@@ -38,7 +38,7 @@ build/
 .claude/skills/mycc/scripts/node_modules/
 .claude/skills/mycc/scripts/debug-table.mjs
 .claude/skills/mycc/scripts/test-table.mjs
-.claude/skills/mycc/scripts/tests/
+# tests 已纳入版本控制（开源仓需要）
 .claude/skills/mycc/start_backend_temp.bat
 .claude/skills/mycc/start_hidden_temp.vbs
 

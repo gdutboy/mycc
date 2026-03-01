@@ -277,7 +277,7 @@ ${skillLine}
     recordHistory(taskCwd, task.name, "执行中...");
 
     try {
-      for await (const _event of adapter.chat({ message, cwd: taskCwd })) {
+      for await (const _event of adapter.chat({ message, cwd: taskCwd, sessionId: task.sessionId })) {
         // 忽略输出，只需要执行
       }
       console.log(chalk.green(`[Scheduler] 任务完成: ${task.name}`));
@@ -344,7 +344,7 @@ ${skillLine}
   let token: string | null = null;
   let mpUrl: string;
 
-  if (tunnelManager === null) {
+  if (tunnelManager === null && !isPublicMode) {
     // Tunnel 不可用，跳过 Worker 注册
     console.warn(chalk.yellow("Tunnel 不可用，跳过 Worker 注册"));
     console.warn(chalk.yellow("Web 通道不可用，仅飞书通道可用\n"));
@@ -359,24 +359,24 @@ ${skillLine}
       console.log(chalk.gray("（直接访问 tunnel URL 仍可用于测试）\n"));
       mpUrl = tunnelUrl; // fallback
     } else {
-    // 注册成功，更新并保存配置
-    if (registerResult?.isNewDevice) {
-      console.log(chalk.green("✓ 新设备注册成功\n"));
-    } else {
-      console.log(chalk.green("✓ 设备已识别，连接码保持不变\n"));
-    }
+      // 注册成功，更新并保存配置
+      if (registerResult?.isNewDevice) {
+        console.log(chalk.green("✓ 新设备注册成功\n"));
+      } else {
+        console.log(chalk.green("✓ 设备已识别，连接码保持不变\n"));
+      }
 
-    // 验证 Worker 是否真的更新了 tunnelUrl
-    console.log(chalk.gray("验证 Worker 映射..."));
-    const verified = await verifyWorkerMapping(token, tunnelUrl);
-    if (verified) {
-      console.log(chalk.green("✓ Worker 映射验证成功\n"));
-    } else {
-      console.error(chalk.red("❌ Worker 映射验证失败"));
-      console.error(chalk.yellow("   建议：请重新启动后端\n"));
-    }
+      // 验证 Worker 是否真的更新了 tunnelUrl
+      console.log(chalk.gray("验证 Worker 映射..."));
+      const verified = await verifyWorkerMapping(token, tunnelUrl);
+      if (verified) {
+        console.log(chalk.green("✓ Worker 映射验证成功\n"));
+      } else {
+        console.error(chalk.red("Worker 映射验证失败"));
+        console.error(chalk.yellow("   建议：请重新启动后端\n"));
+      }
 
-    mpUrl = `${WORKER_URL}/${token}`;
+      mpUrl = `${WORKER_URL}/${token}`;
     }
   }
 
@@ -640,6 +640,27 @@ ${chalk.yellow("示例:")}
   cc-mp start --reset   # 重置配置，需要重新配对
 `);
 }
+
+// === 全局异常兜底：防止 SDK 子进程崩溃杀死整个 Node 进程 ===
+process.on("unhandledRejection", (reason) => {
+  console.error("[全局] unhandledRejection，清理所有 session:", reason);
+  try {
+    adapter.closeAllSessions();
+  } catch {
+    // 静默处理
+  }
+  // 不 process.exit —— 让 HTTP 服务继续运行
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[全局] uncaughtException，清理所有 session:", err);
+  try {
+    adapter.closeAllSessions();
+  } catch {
+    // 静默处理
+  }
+  // 不 process.exit —— 让 HTTP 服务继续运行
+});
 
 main().catch((error) => {
   console.error(chalk.red("启动失败:"), error);

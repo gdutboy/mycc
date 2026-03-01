@@ -116,8 +116,15 @@ export class ChannelManager {
       promises.push(channel.send(event));
     }
 
-    // 等待所有通道发送完成
-    await Promise.all(promises);
+    // 等待所有通道发送完成（allSettled：单通道失败不影响其他）
+    const results = await Promise.allSettled(promises);
+
+    // 记录失败的通道
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error(`[ChannelManager] broadcast 失败:`, result.reason);
+      }
+    }
   }
 
   /**

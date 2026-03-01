@@ -31,7 +31,6 @@ function stripSystemTags(text: string): string {
     .replace(/<current-time[^>]*>[\s\S]*?<\/current-time>/g, "")
     .replace(/<system-reminder[^>]*>[\s\S]*?<\/system-reminder>/g, "")
     .replace(/<command-name[^>]*>[\s\S]*?<\/command-name>/g, "")
-    .replace(/<command-message[^>]*>[\s\S]*?<\/command-message>/g, "")
     .trim();
 }
 

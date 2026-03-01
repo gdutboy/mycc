@@ -57,4 +57,12 @@ export interface CCAdapter {
    * 关闭所有 session（退出时调用）
    */
   closeAllSessions(): void;
+
+  /**
+   * 设置 session 生命周期回调
+   */
+  setLifecycleCallbacks(callbacks: {
+    onSessionCreate?: (sessionId: string) => void;
+    onSessionClose?: (sessionId: string) => void;
+  }): void;
 }
