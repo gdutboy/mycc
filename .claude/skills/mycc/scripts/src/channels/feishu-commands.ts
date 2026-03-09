@@ -19,6 +19,7 @@ export interface FeishuCommandsDeps {
 export class FeishuCommands {
   private deps: FeishuCommandsDeps;
   private _currentSessionId: string | null = null;
+  private _cachedSessions: Array<{ sessionId: string; customTitle?: string; firstPrompt?: string; lastMessagePreview?: string; lastTime?: string; modified?: number }> = [];
 
   constructor(deps: FeishuCommandsDeps) {
     this.deps = deps;
@@ -36,9 +37,18 @@ export class FeishuCommands {
    * 处理飞书收到的消息
    */
   async processMessage(message: string, images?: Array<{ data: string; mediaType: string }>): Promise<void> {
-    console.log(`[CC] 收到飞书消息: ${message.substring(0, 50)}...${images ? ` [${images.length} 张图片]` : ""}`);
+    console.log(`[CC] 收到飞书消息: ${message.substring(0, 50)}...${images ? ` [${images.length} 张图片, 首张大小: ${images[0]?.data?.length || 0} bytes, 类型: ${images[0]?.mediaType}]` : ""}`);
 
-    const trimmedMessage = message.trim();
+    // 消息预处理：移除 @机器人 部分，清理多余空格
+    let cleanedMessage = message;
+    // 移除 @机器人 相关的文本（飞书格式：<at id=all></at> 或类似）
+    cleanedMessage = cleanedMessage.replace(/<at[^>]*>.*?<\/at>/gi, "");
+    // 移除 @all 或 @everyone
+    cleanedMessage = cleanedMessage.replace(/@(?:all|everyone|everyone)/gi, "");
+    // 清理多余空格
+    cleanedMessage = cleanedMessage.trim().replace(/\s+/g, " ");
+
+    const trimmedMessage = cleanedMessage;
 
     // 检查是否是命令
     if (trimmedMessage.startsWith("/")) {
@@ -240,6 +250,9 @@ export class FeishuCommands {
       const result = await this.deps.adapter.listHistory(this.deps.cwd, 10);
       const conversations = result.conversations;
 
+      // 缓存会话列表，供 /switch 使用
+      this._cachedSessions = conversations;
+
       if (conversations.length === 0) {
         await this.sendToFeishu("还没有历史会话。\n\n发送 /new 创建第一个会话。");
         return;
@@ -282,8 +295,12 @@ export class FeishuCommands {
     }
 
     try {
-      const result = await this.deps.adapter.listHistory(this.deps.cwd, 50);
-      const conversations = result.conversations;
+      // 优先使用缓存的会话列表，如果没有缓存则重新请求
+      let conversations = this._cachedSessions;
+      if (conversations.length === 0) {
+        const result = await this.deps.adapter.listHistory(this.deps.cwd, 50);
+        conversations = result.conversations;
+      }
 
       const index = parseInt(target, 10) - 1;
       if (isNaN(index) || index < 0 || index >= conversations.length) {

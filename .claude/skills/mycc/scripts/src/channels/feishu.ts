@@ -383,10 +383,18 @@ export class FeishuChannel implements MessageChannel {
           const imageKey = parsed.image_key;
           if (imageKey) {
             // 需要通过飞书 API 获取图片数据
-            return this.downloadImageFromFeishu(imageKey, messageId).then(data => ({
-              text: "",
-              images: data ? [{ data, mediaType: "image/png" }] : undefined
-            }));
+            console.log(`[FeishuChannel] [DEBUG] 下载图片, imageKey: ${imageKey}, messageId: ${messageId}`);
+            return this.downloadImageFromFeishu(imageKey, messageId).then(result => {
+              if (result) {
+                console.log(`[FeishuChannel] [DEBUG] 图片下载成功: ${result.data.length} bytes, mediaType: ${result.mediaType}`);
+              } else {
+                console.log(`[FeishuChannel] [DEBUG] 图片下载失败`);
+              }
+              return {
+                text: "",
+                images: result ? [{ data: result.data, mediaType: result.mediaType }] : undefined
+              };
+            });
           }
         }
         console.log(`[FeishuChannel] 图片消息没有 image_key`);
@@ -573,7 +581,7 @@ export class FeishuChannel implements MessageChannel {
    * "For message media, always use messageResource API
    *  The image.get API is only for images uploaded via im/v1/images, not for message attachments"
    */
-  private async downloadImageFromFeishu(imageKey: string, messageId?: string): Promise<string | null> {
+  private async downloadImageFromFeishu(imageKey: string, messageId?: string): Promise<{ data: string; mediaType: string } | null> {
     try {
       // 获取访问令牌（如果需要）
       if (!this.accessToken || Date.now() > this.tokenExpireTime) {
@@ -601,8 +609,10 @@ export class FeishuChannel implements MessageChannel {
         if (resourceResponse.ok) {
           const buffer = await resourceResponse.arrayBuffer();
           const base64 = Buffer.from(buffer).toString("base64");
-          console.log(`[FeishuChannel] ✓ Downloaded image: ${base64.length} bytes (base64)`);
-          return base64;
+          // 从 Content-Type 获取实际媒体类型
+          const contentType = resourceResponse.headers.get("content-type") || "image/png";
+          console.log(`[FeishuChannel] ✓ Downloaded image: ${base64.length} bytes (${contentType})`);
+          return { data: base64, mediaType: contentType };
         } else {
           const errorText = await resourceResponse.text();
           console.error(`[FeishuChannel] ✗ Resource download failed: ${resourceResponse.status}`, errorText.substring(0, 200));
@@ -623,8 +633,10 @@ export class FeishuChannel implements MessageChannel {
       if (directResponse.ok) {
         const buffer = await directResponse.arrayBuffer();
         const base64 = Buffer.from(buffer).toString("base64");
-        console.log(`[FeishuChannel] ✓ Downloaded image via direct API: ${base64.length} bytes (base64)`);
-        return base64;
+        // 从 Content-Type 获取实际媒体类型
+        const contentType = directResponse.headers.get("content-type") || "image/png";
+        console.log(`[FeishuChannel] ✓ Downloaded image via direct API: ${base64.length} bytes (${contentType})`);
+        return { data: base64, mediaType: contentType };
       } else {
         const errorText = await directResponse.text();
         console.error(`[FeishuChannel] ✗ Direct image download failed: ${directResponse.status}`, errorText.substring(0, 200));
@@ -718,9 +730,37 @@ export class FeishuChannel implements MessageChannel {
   }
 
   /**
-   * 发送 Markdown 消息
+   * 发送 Markdown 消息（使用交互式卡片 + lark_md）
    */
   private async sendMarkdownMessage(userId: string, text: string): Promise<boolean> {
+    try {
+      // 使用交互式卡片 + lark_md 模式，提供更好的渲染效果
+      const card = {
+        config: {
+          wide_screen_mode: true
+        },
+        elements: [
+          {
+            tag: "div",
+            text: {
+              tag: "lark_md",
+              content: text
+            }
+          }
+        ]
+      };
+
+      return await this.sendInteractiveCard(userId, card);
+    } catch (error) {
+      console.error("[FeishuChannel] ✗ Send error:", error);
+      return false;
+    }
+  }
+
+  /**
+   * 发送 Markdown 消息（旧方法，保留作为降级方案）
+   */
+  private async sendLegacyMarkdownMessage(userId: string, text: string): Promise<boolean> {
     try {
       const receiveIdType = this.config.receiveIdType || "open_id";
 
