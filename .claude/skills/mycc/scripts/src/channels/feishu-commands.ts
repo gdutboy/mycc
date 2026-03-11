@@ -8,7 +8,7 @@ import type { CCAdapter } from "../adapters/interface.js";
 import type { ChannelManager } from "./manager.js";
 import type { DeviceConfig } from "../types.js";
 import type { FeishuStreamingSession } from "./feishu-streaming.js";
-import { TeamEngine, formatTeamResults } from "../engines/index.js";
+import { TeamEngine, formatTeamResults, type TeamMode } from "../engines/index.js";
 
 export interface FeishuCommandsDeps {
   adapter: CCAdapter;
@@ -536,27 +536,40 @@ export class FeishuCommands {
       return;
     }
 
-    // 正式执行团队模式
-    if (!prompt.trim()) {
-      await this.sendToFeishu("请提供要处理的问题。\n\n用法:\n- `/team <问题>` - 执行团队模式\n- `/team on` - 开启团队模式\n- `/team off` - 关闭团队模式\n- `/team status` - 查看状态\n\n注意：需要先发送 `/team on` 开启团队模式");
+    // 解析模式：/team fast xxx 或 /team deep xxx，默认 deep
+    let mode: TeamMode = 'deep';
+    let actualPrompt = prompt.trim();
+    const firstWord = actualPrompt.split(/\s+/)[0]?.toLowerCase();
+    if (firstWord === 'fast' || firstWord === 'deep') {
+      mode = firstWord as TeamMode;
+      actualPrompt = actualPrompt.slice(firstWord.length).trim();
+    }
+
+    if (!actualPrompt) {
+      await this.sendToFeishu("请提供要处理的问题。\n\n用法:\n- `/team <问题>` - 深度模式（默认）\n- `/team fast <问题>` - 快速模式\n- `/team deep <问题>` - 深度模式\n- `/team on/off/status` - 开关/状态");
       return;
     }
 
-    console.log(`[CC] 团队模式: ${prompt.substring(0, 50)}...`);
+    console.log(`[CC] 团队模式 [${mode}]: ${actualPrompt.substring(0, 50)}...`);
 
     try {
-      // 发送初始状态
-      await this.sendToFeishu("🚀 **启动团队模式**\n\n三引擎并行处理中...\n\n请稍候");
+      const modeLabel = mode === 'fast' ? '⚡ 快速模式' : '🧠 深度模式';
+      await this.sendToFeishu(`🚀 **启动团队模式** (${modeLabel})\n\n三引擎并行处理中...\n\n请稍候`);
 
       const engine = new TeamEngine({
-        timeout: 120 * 1000, // 2分钟超时
-        cwd: this.deps.cwd
+        timeout: 45 * 1000,
+        cwd: this.deps.cwd,
+        mode
       });
 
-      const results = await engine.run(prompt);
+      const results = await engine.run(actualPrompt);
 
-      // 格式化并发送结果
-      const output = formatTeamResults(results);
+      // CC 汇总分析（三引擎结果作为上下文）
+      await this.sendToFeishu("⏳ CC 正在综合分析三引擎结果...");
+      const summary = await engine.summarizeWithCC(actualPrompt, results);
+
+      // 格式化并发送结果（含 CC 汇总）
+      const output = formatTeamResults(results, summary);
       await this.sendToFeishu(output);
 
     } catch (err) {
