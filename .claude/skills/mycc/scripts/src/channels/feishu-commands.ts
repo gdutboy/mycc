@@ -8,6 +8,7 @@ import type { CCAdapter } from "../adapters/interface.js";
 import type { ChannelManager } from "./manager.js";
 import type { DeviceConfig } from "../types.js";
 import type { FeishuStreamingSession } from "./feishu-streaming.js";
+import { TeamEngine, formatTeamResults } from "../engines/index.js";
 
 export interface FeishuCommandsDeps {
   adapter: CCAdapter;
@@ -20,6 +21,7 @@ export interface FeishuCommandsDeps {
 export class FeishuCommands {
   private deps: FeishuCommandsDeps;
   private _currentSessionId: string | null = null;
+  private _teamModeEnabled = false; // 团队模式开关，默认关闭
 
   constructor(deps: FeishuCommandsDeps) {
     this.deps = deps;
@@ -47,6 +49,16 @@ export class FeishuCommands {
     // 检查是否是命令
     if (trimmedMessage.startsWith("/")) {
       await this.handleFeishuCommand(trimmedMessage);
+      return;
+    }
+
+    // 检查是否触发团队模式（需要先开启开关 + 关键词检测）
+    const teamKeywords = ['并行', '多引擎', '贾维斯', 'jarvis', 'team', '团队模式', '多代理'];
+    const hasTeamKeyword = teamKeywords.some(k => trimmedMessage.toLowerCase().includes(k.toLowerCase()));
+
+    if (this._teamModeEnabled && hasTeamKeyword) {
+      console.log(`[CC] 团队模式已开启，触发团队模式`);
+      await this.handleTeamMode(trimmedMessage);
       return;
     }
 
@@ -223,6 +235,11 @@ export class FeishuCommands {
         case "/help":
         case "/?":
           await this.handleHelp();
+          break;
+
+        case "/team":
+        case "/teamMode":
+          await this.handleTeamMode(args.join(" "));
           break;
 
         default:
@@ -480,18 +497,72 @@ export class FeishuCommands {
       "/sessions - 查看历史会话\n" +
       "/switch <序号> - 切换到某个会话\n" +
       "/current - 显示当前会话信息\n\n" +
+      "**团队模式**\n" +
+      "/team <问题> - 并行调用三引擎\n\n" +
       "**设备管理**\n" +
       "/device - 查看当前设备信息\n\n" +
       "**其他**\n" +
       "/help - 显示此帮助信息\n\n" +
       "**示例**\n" +
-      "/new 分析代码\n" +
-      "/sessions\n" +
-      "/switch 1\n" +
-      "/device\n\n" +
-      "提示：非命令消息会发送到当前活跃会话";
+      "/team 分析这段代码的优缺点\n" +
+      "并行帮我写一个排序算法\n\n" +
+      "提示：发送包含「并行」「贾维斯」「团队模式」等关键词也会触发团队模式";
 
     await this.sendToFeishu(helpText);
+  }
+
+  /**
+   * 处理团队模式 - 并行调用三引擎
+   */
+  private async handleTeamMode(prompt: string): Promise<void> {
+    // 检查是否是开关命令
+    const lowerPrompt = prompt.toLowerCase().trim();
+
+    if (lowerPrompt === 'on' || lowerPrompt === '开启' || lowerPrompt === '启用') {
+      this._teamModeEnabled = true;
+      await this.sendToFeishu("✅ **团队模式已开启**\n\n发送包含「并行」「贾维斯」「团队模式」等关键词的消息将触发三引擎并行处理。\n\n发送 `/team off` 可关闭。");
+      return;
+    }
+
+    if (lowerPrompt === 'off' || lowerPrompt === '关闭' || lowerPrompt === '禁用') {
+      this._teamModeEnabled = false;
+      await this.sendToFeishu("🔴 **团队模式已关闭**");
+      return;
+    }
+
+    if (lowerPrompt === 'status' || lowerPrompt === '状态') {
+      const status = this._teamModeEnabled ? "✅ 已开启" : "🔴 已关闭";
+      await this.sendToFeishu(`团队模式状态: ${status}`);
+      return;
+    }
+
+    // 正式执行团队模式
+    if (!prompt.trim()) {
+      await this.sendToFeishu("请提供要处理的问题。\n\n用法:\n- `/team <问题>` - 执行团队模式\n- `/team on` - 开启团队模式\n- `/team off` - 关闭团队模式\n- `/team status` - 查看状态\n\n注意：需要先发送 `/team on` 开启团队模式");
+      return;
+    }
+
+    console.log(`[CC] 团队模式: ${prompt.substring(0, 50)}...`);
+
+    try {
+      // 发送初始状态
+      await this.sendToFeishu("🚀 **启动团队模式**\n\n三引擎并行处理中...\n\n请稍候");
+
+      const engine = new TeamEngine({
+        timeout: 120 * 1000, // 2分钟超时
+        cwd: this.deps.cwd
+      });
+
+      const results = await engine.run(prompt);
+
+      // 格式化并发送结果
+      const output = formatTeamResults(results);
+      await this.sendToFeishu(output);
+
+    } catch (err) {
+      console.error(`[CC] 团队模式错误:`, err);
+      await this.sendToFeishu(`❌ 团队模式执行失败: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   private async sendToFeishu(text: string): Promise<void> {
