@@ -129,3 +129,4 @@ ieee_results.html
 package-lock.json
 2-Projects/stockquant-v3-phase3-implementation/cloudfunctions/aiPricePredictor/real_stock_data_enhanced_v2.json
 2-Projects/stockquant-v3-phase3-implementation/cloudfunctions/aiPricePredictor/real_stock_data_v3_large.json
+__pycache__/
