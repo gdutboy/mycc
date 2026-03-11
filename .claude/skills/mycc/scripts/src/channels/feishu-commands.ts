@@ -7,6 +7,7 @@
 import type { CCAdapter } from "../adapters/interface.js";
 import type { ChannelManager } from "./manager.js";
 import type { DeviceConfig } from "../types.js";
+import type { FeishuStreamingSession } from "./feishu-streaming.js";
 
 export interface FeishuCommandsDeps {
   adapter: CCAdapter;
@@ -19,7 +20,6 @@ export interface FeishuCommandsDeps {
 export class FeishuCommands {
   private deps: FeishuCommandsDeps;
   private _currentSessionId: string | null = null;
-  private _cachedSessions: Array<{ sessionId: string; customTitle?: string; firstPrompt?: string; lastMessagePreview?: string; lastTime?: string; modified?: number }> = [];
 
   constructor(deps: FeishuCommandsDeps) {
     this.deps = deps;
@@ -35,20 +35,14 @@ export class FeishuCommands {
 
   /**
    * 处理飞书收到的消息
+   * @param message - 消息文本
+   * @param images - 图片数组
+   * @param messageId - 原始消息 ID，用于回复和流式卡片
    */
-  async processMessage(message: string, images?: Array<{ data: string; mediaType: string }>): Promise<void> {
-    console.log(`[CC] 收到飞书消息: ${message.substring(0, 50)}...${images ? ` [${images.length} 张图片, 首张大小: ${images[0]?.data?.length || 0} bytes, 类型: ${images[0]?.mediaType}]` : ""}`);
+  async processMessage(message: string, images?: Array<{ data: string; mediaType: string }>, messageId?: string): Promise<void> {
+    console.log(`[CC] 收到飞书消息: ${message.substring(0, 50)}...${images ? ` [${images.length} 张图片]` : ""}`);
 
-    // 消息预处理：移除 @机器人 部分，清理多余空格
-    let cleanedMessage = message;
-    // 移除 @机器人 相关的文本（飞书格式：<at id=all></at> 或类似）
-    cleanedMessage = cleanedMessage.replace(/<at[^>]*>.*?<\/at>/gi, "");
-    // 移除 @all 或 @everyone
-    cleanedMessage = cleanedMessage.replace(/@(?:all|everyone|everyone)/gi, "");
-    // 清理多余空格
-    cleanedMessage = cleanedMessage.trim().replace(/\s+/g, " ");
-
-    const trimmedMessage = cleanedMessage;
+    const trimmedMessage = message.trim();
 
     // 检查是否是命令
     if (trimmedMessage.startsWith("/")) {
@@ -85,6 +79,28 @@ export class FeishuCommands {
 
     console.log(`[CC] 使用当前会话: ${this._currentSessionId}`);
 
+    // 尝试启动流式卡片（单卡片实时更新，替代逐条消息）
+    let streamingSession: FeishuStreamingSession | null = null;
+    const feishuChannel = this.deps.feishuChannel;
+
+    if (feishuChannel && messageId) {
+      try {
+        const cfg = feishuChannel.getConfig();
+        if (cfg.appId && cfg.appSecret && cfg.receiveUserId) {
+          const session = feishuChannel.createStreamingSession();
+          const idType = cfg.receiveIdType === "chat_id" ? "chat_id" : "open_id";
+          await session.start(cfg.receiveUserId, idType, messageId);
+          streamingSession = session;
+          console.log(`[CC] 流式卡片已启动`);
+        }
+      } catch (err) {
+        console.warn(`[CC] 流式卡片启动失败，降级为普通消息: ${err}`);
+        streamingSession = null;
+      }
+    }
+
+    let accumulatedText = "";
+
     try {
       for await (const data of this.deps.adapter.chat({
         message: trimmedMessage,
@@ -97,43 +113,73 @@ export class FeishuCommands {
             this._currentSessionId = data.session_id as string;
             console.log(`[CC] 会话已更新: ${this._currentSessionId}`);
           }
-          if (data.type === "text" && data.text) {
-            const text = String(data.text);
-            console.log(`[CC] 发送文本: ${text.substring(0, 30)}...`);
-            await this.sendToFeishu(text);
-          } else if (data.type === "assistant") {
-            const assistantEvent = data as any;
-            if (assistantEvent.message?.content) {
-              for (const block of assistantEvent.message.content) {
-                if (block.type === "text" && block.text) {
-                  const text = String(block.text);
-                  console.log(`[CC] 发送文本: ${text.substring(0, 30)}...`);
-                  await this.sendToFeishu(text);
-                } else if (block.type === "tool_use") {
-                  const name = block.name || "unknown";
-                  let toolCallText = `**使用工具: ${name}**`;
-                  if (block.input && Object.keys(block.input).length > 0) {
-                    const inputStr = JSON.stringify(block.input, null, 2);
-                    if (inputStr.length > 300) {
-                      toolCallText += `\n\`\`\`\n${inputStr.substring(0, 300)}...\n\`\`\``;
-                    } else {
-                      toolCallText += `\n\`\`\`\n${inputStr}\n\`\`\``;
-                    }
+
+          if (streamingSession) {
+            // 流式卡片模式：收集文本并实时更新
+            if (data.type === "text" && data.text) {
+              accumulatedText += String(data.text);
+              await streamingSession.update(accumulatedText);
+            } else if (data.type === "assistant") {
+              const content = (data as any).message?.content;
+              if (Array.isArray(content)) {
+                for (const block of content) {
+                  if (block.type === "text" && block.text) {
+                    accumulatedText += String(block.text);
                   }
-                  console.log(`[CC] 发送工具调用: ${name}`);
-                  await this.sendToFeishu(toolCallText);
+                }
+                await streamingSession.update(accumulatedText);
+              }
+            }
+          } else {
+            // 降级模式：逐条发送
+            if (data.type === "text" && data.text) {
+              const text = String(data.text);
+              console.log(`[CC] 发送文本: ${text.substring(0, 30)}...`);
+              await this.sendToFeishu(text);
+            } else if (data.type === "assistant") {
+              const assistantEvent = data as any;
+              if (assistantEvent.message?.content) {
+                for (const block of assistantEvent.message.content) {
+                  if (block.type === "text" && block.text) {
+                    const text = String(block.text);
+                    console.log(`[CC] 发送文本: ${text.substring(0, 30)}...`);
+                    await this.sendToFeishu(text);
+                  } else if (block.type === "tool_use") {
+                    const name = block.name || "unknown";
+                    let toolCallText = `**使用工具: ${name}**`;
+                    if (block.input && Object.keys(block.input).length > 0) {
+                      const inputStr = JSON.stringify(block.input, null, 2);
+                      toolCallText +=
+                        inputStr.length > 300
+                          ? `\n\`\`\`\n${inputStr.substring(0, 300)}...\n\`\`\``
+                          : `\n\`\`\`\n${inputStr}\n\`\`\``;
+                    }
+                    console.log(`[CC] 发送工具调用: ${name}`);
+                    await this.sendToFeishu(toolCallText);
+                  }
                 }
               }
             }
           }
         }
       }
+
+      // 关闭流式卡片
+      if (streamingSession) {
+        await streamingSession.close(accumulatedText || undefined);
+      }
     } catch (err) {
       console.error(`[CC] 处理飞书消息错误:`, err);
-      await this.sendToFeishu("处理消息时出错，请重试。");
+      if (streamingSession) {
+        await streamingSession
+          .close(accumulatedText || "处理消息时出错，请重试。")
+          .catch(() => {});
+      } else {
+        await this.sendToFeishu("处理消息时出错，请重试。");
+      }
     } finally {
-      if (this.deps.feishuChannel) {
-        await this.deps.feishuChannel.clearTypingIndicator();
+      if (feishuChannel) {
+        await feishuChannel.clearTypingIndicator();
       }
     }
   }
@@ -250,9 +296,6 @@ export class FeishuCommands {
       const result = await this.deps.adapter.listHistory(this.deps.cwd, 10);
       const conversations = result.conversations;
 
-      // 缓存会话列表，供 /switch 使用
-      this._cachedSessions = conversations;
-
       if (conversations.length === 0) {
         await this.sendToFeishu("还没有历史会话。\n\n发送 /new 创建第一个会话。");
         return;
@@ -295,12 +338,8 @@ export class FeishuCommands {
     }
 
     try {
-      // 优先使用缓存的会话列表，如果没有缓存则重新请求
-      let conversations = this._cachedSessions;
-      if (conversations.length === 0) {
-        const result = await this.deps.adapter.listHistory(this.deps.cwd, 50);
-        conversations = result.conversations;
-      }
+      const result = await this.deps.adapter.listHistory(this.deps.cwd, 50);
+      const conversations = result.conversations;
 
       const index = parseInt(target, 10) - 1;
       if (isNaN(index) || index < 0 || index >= conversations.length) {

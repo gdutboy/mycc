@@ -9,6 +9,11 @@
 import type { MessageChannel } from "./interface.js";
 import type { SSEEvent } from "../adapters/interface.js";
 import Lark from "@larksuiteoapi/node-sdk";
+import {
+  FeishuStreamingSession,
+  buildMarkdownCard,
+  normalizeFeishuMarkdownLinks,
+} from "./feishu-streaming.js";
 
 /**
  * 飞书通道配置
@@ -383,18 +388,10 @@ export class FeishuChannel implements MessageChannel {
           const imageKey = parsed.image_key;
           if (imageKey) {
             // 需要通过飞书 API 获取图片数据
-            console.log(`[FeishuChannel] [DEBUG] 下载图片, imageKey: ${imageKey}, messageId: ${messageId}`);
-            return this.downloadImageFromFeishu(imageKey, messageId).then(result => {
-              if (result) {
-                console.log(`[FeishuChannel] [DEBUG] 图片下载成功: ${result.data.length} bytes, mediaType: ${result.mediaType}`);
-              } else {
-                console.log(`[FeishuChannel] [DEBUG] 图片下载失败`);
-              }
-              return {
-                text: "",
-                images: result ? [{ data: result.data, mediaType: result.mediaType }] : undefined
-              };
-            });
+            return this.downloadImageFromFeishu(imageKey, messageId).then(data => ({
+              text: "",
+              images: data ? [{ data, mediaType: "image/png" }] : undefined
+            }));
           }
         }
         console.log(`[FeishuChannel] 图片消息没有 image_key`);
@@ -581,7 +578,7 @@ export class FeishuChannel implements MessageChannel {
    * "For message media, always use messageResource API
    *  The image.get API is only for images uploaded via im/v1/images, not for message attachments"
    */
-  private async downloadImageFromFeishu(imageKey: string, messageId?: string): Promise<{ data: string; mediaType: string } | null> {
+  private async downloadImageFromFeishu(imageKey: string, messageId?: string): Promise<string | null> {
     try {
       // 获取访问令牌（如果需要）
       if (!this.accessToken || Date.now() > this.tokenExpireTime) {
@@ -609,10 +606,8 @@ export class FeishuChannel implements MessageChannel {
         if (resourceResponse.ok) {
           const buffer = await resourceResponse.arrayBuffer();
           const base64 = Buffer.from(buffer).toString("base64");
-          // 从 Content-Type 获取实际媒体类型
-          const contentType = resourceResponse.headers.get("content-type") || "image/png";
-          console.log(`[FeishuChannel] ✓ Downloaded image: ${base64.length} bytes (${contentType})`);
-          return { data: base64, mediaType: contentType };
+          console.log(`[FeishuChannel] ✓ Downloaded image: ${base64.length} bytes (base64)`);
+          return base64;
         } else {
           const errorText = await resourceResponse.text();
           console.error(`[FeishuChannel] ✗ Resource download failed: ${resourceResponse.status}`, errorText.substring(0, 200));
@@ -633,10 +628,8 @@ export class FeishuChannel implements MessageChannel {
       if (directResponse.ok) {
         const buffer = await directResponse.arrayBuffer();
         const base64 = Buffer.from(buffer).toString("base64");
-        // 从 Content-Type 获取实际媒体类型
-        const contentType = directResponse.headers.get("content-type") || "image/png";
-        console.log(`[FeishuChannel] ✓ Downloaded image via direct API: ${base64.length} bytes (${contentType})`);
-        return { data: base64, mediaType: contentType };
+        console.log(`[FeishuChannel] ✓ Downloaded image via direct API: ${base64.length} bytes (base64)`);
+        return base64;
       } else {
         const errorText = await directResponse.text();
         console.error(`[FeishuChannel] ✗ Direct image download failed: ${directResponse.status}`, errorText.substring(0, 200));
@@ -675,17 +668,9 @@ export class FeishuChannel implements MessageChannel {
 
       const receiveIdType = this.config.receiveIdType || "open_id";
 
-      // 检查文本中是否包含表格
-      const tableData = this.parseMarkdownTable(text);
-
-      if (tableData) {
-        // 使用交互卡片 + 表格组件
-        const cardContent = this.buildTableCard(tableData.beforeTable, tableData.headers, tableData.rows, tableData.afterTable);
-        return await this.sendInteractiveCard(userId, cardContent);
-      }
-
-      // 没有表格，使用普通 Markdown 消息
-      return await this.sendMarkdownMessage(userId, text);
+      // 使用 schema 2.0 markdown 卡片（支持代码块、表格、链接等完整 markdown）
+      const normalizedText = normalizeFeishuMarkdownLinks(text);
+      return await this.sendMarkdownCardMessage(userId, normalizedText);
     } catch (error) {
       console.error("[FeishuChannel] ✗ Send error:", error);
       return false;
@@ -730,70 +715,45 @@ export class FeishuChannel implements MessageChannel {
   }
 
   /**
-   * 发送 Markdown 消息（使用交互式卡片 + lark_md）
+   * 发送 schema 2.0 markdown 卡片消息
+   * 完整支持代码块、表格、链接、加粗等 markdown 语法
    */
-  private async sendMarkdownMessage(userId: string, text: string): Promise<boolean> {
-    try {
-      // 使用交互式卡片 + lark_md 模式，提供更好的渲染效果
-      const card = {
-        config: {
-          wide_screen_mode: true
-        },
-        elements: [
-          {
-            tag: "div",
-            text: {
-              tag: "lark_md",
-              content: text
-            }
-          }
-        ]
-      };
-
-      return await this.sendInteractiveCard(userId, card);
-    } catch (error) {
-      console.error("[FeishuChannel] ✗ Send error:", error);
-      return false;
-    }
-  }
-
-  /**
-   * 发送 Markdown 消息（旧方法，保留作为降级方案）
-   */
-  private async sendLegacyMarkdownMessage(userId: string, text: string): Promise<boolean> {
+  private async sendMarkdownCardMessage(userId: string, text: string): Promise<boolean> {
     try {
       const receiveIdType = this.config.receiveIdType || "open_id";
+      const card = buildMarkdownCard(text);
 
       const responseBody = {
         receive_id: userId,
-        msg_type: "post",
-        content: JSON.stringify({
-          zh_cn: {
-            content: [[{ tag: "md", text }]]
-          }
-        })
+        msg_type: "interactive",
+        content: JSON.stringify(card),
       };
 
-      const response = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${receiveIdType}`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${this.accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(responseBody),
-      });
+      const response = await fetch(
+        `https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${receiveIdType}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(responseBody),
+        }
+      );
 
       const result = await response.json();
       if (result.code === 0) {
-        console.log(`[FeishuChannel] ✓ Sent: ${text.substring(0, 30)}${text.length > 30 ? "..." : ""}`);
+        console.log(
+          `[FeishuChannel] ✓ Sent card: ${text.substring(0, 30)}${text.length > 30 ? "..." : ""}`
+        );
         await sleep(1000);
         return true;
       } else {
-        console.error("[FeishuChannel] ✗ Send failed:", result.msg);
+        console.error("[FeishuChannel] ✗ Send card failed:", result.msg);
         return false;
       }
     } catch (error) {
-      console.error("[FeishuChannel] ✗ Send error:", error);
+      console.error("[FeishuChannel] ✗ Send card error:", error);
       return false;
     }
   }
@@ -940,6 +900,24 @@ export class FeishuChannel implements MessageChannel {
       this.currentReactionId = null;
       console.log("[FeishuChannel] ✓ 已移除正在输入表态");
     }
+  }
+
+  /**
+   * 创建飞书流式卡片会话
+   * 用于 AI 回复实时更新到单个卡片，替代逐条发送消息
+   */
+  createStreamingSession(): FeishuStreamingSession {
+    return new FeishuStreamingSession(
+      { appId: this.config.appId, appSecret: this.config.appSecret },
+      (msg) => console.log(msg)
+    );
+  }
+
+  /**
+   * 暴露配置（供流式会话使用）
+   */
+  getConfig(): FeishuChannelConfig {
+    return this.config;
   }
 
   /**

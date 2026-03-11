@@ -11,7 +11,7 @@
 import { execSync } from "child_process";
 import { mkdirSync, writeFileSync, existsSync, appendFileSync } from "fs";
 import { homedir } from "os";
-import { dirname } from "path";
+import { dirname, basename } from "path";
 import { fileURLToPath } from "url";
 import { join } from "path";
 
@@ -33,6 +33,7 @@ import { adapter } from "./adapters/index.js";
 import { CloudflareProvider } from "./tunnel-provider.js";
 import { TunnelManager } from "./tunnel-manager.js";
 import { loadPublicUrl, loadEnvFile } from "./env-loader.js";
+import { initNotificationSystem, sendNotification, isTerminalInForeground } from "./notification.js";
 
 const PORT = process.env.PORT || 18080;
 const WORKER_URL = process.env.WORKER_URL || "https://api.mycc.dev";
@@ -216,6 +217,30 @@ async function startServer(args: string[]) {
     throw error;
   }
 
+  // 初始化通知系统
+  initNotificationSystem();
+
+  // 启动成功后，发送通知（如果终端不在前台）
+  const sessionName = basename(cwd);
+  sendNotification({
+    sessionId: sessionName,
+    title: 'CC 已启动',
+    message: `mycc 后端已运行: ${sessionName}`,
+    type: 'general',
+  });
+
+  // 发送退出通知的辅助函数
+  const sendStopNotification = () => {
+    sendNotification({
+      sessionId: sessionName,
+      title: 'CC 已停止',
+      message: `mycc 后端已退出: ${sessionName}`,
+      type: 'stop',
+    });
+  };
+
+  // 记录任务执行历史到 history.md
+
   // 记录任务执行历史到 history.md
   const recordHistory = (taskCwd: string, taskName: string, status: string) => {
     const historyPath = join(taskCwd, ".claude", "skills", "scheduler", "history.md");
@@ -268,8 +293,10 @@ async function startServer(args: string[]) {
 ---
 执行要求：
 ${skillLine}
-2. 完成后用 /tell-me 发飞书通知（位置：.claude/skills/tell-me）
-3. 通知标题格式：【定时任务】${task.name}
+2. 完成后发飞书通知，命令格式：
+   node .claude/skills/tell-me/send.js "【定时任务】${task.name}" "通知内容（支持 lark_md 格式）" [颜色]
+   颜色：green=成功，blue=普通，orange=提醒，red=错误
+3. 通知内容必须包含：任务结果、执行详情
 4. 卡片底部 note 填写时间戳：${timestamp}
 5. 任务定义位置：.claude/skills/scheduler/tasks.md`;
 
@@ -480,6 +507,7 @@ ${skillLine}
   // 处理退出
   process.on("SIGINT", () => {
     console.log(chalk.yellow("\n正在退出..."));
+    sendStopNotification();
     adapter.closeAllSessions();
     tunnelManager?.stop();
     stopScheduler();
@@ -488,6 +516,7 @@ ${skillLine}
   });
 
   process.on("SIGTERM", () => {
+    sendStopNotification();
     adapter.closeAllSessions();
     tunnelManager?.stop();
     stopScheduler();
