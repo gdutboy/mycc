@@ -120,13 +120,28 @@ description: 做什么 + 什么时候触发
 - 断言的名字要一目了然
 
 跑完后：
-1. 评分（Grader）— 每个断言 pass/fail + evidence
-2. 汇总对比 — with-skill vs baseline 的通过率、耗时、token
-3. 展示给用户 — 每个测试的 prompt + 输出 + 评分，让用户留反馈
+1. **评分** — 参考 `agents/grader.md`，评估每个断言 pass/fail + evidence，保存到 `grading.json`
+2. **汇总对比** — 运行聚合脚本：
+   ```bash
+   python -m scripts.aggregate_benchmark <workspace>/iteration-N --skill-name <name>
+   ```
+   生成 `benchmark.json` + `benchmark.md`（pass_rate/时间/token 对比）
+3. **启动 Viewer** — 让用户在浏览器中评审：
+   ```bash
+   nohup python eval-viewer/generate_review.py <workspace>/iteration-N \
+     --skill-name "skill-name" \
+     --benchmark <workspace>/iteration-N/benchmark.json > /dev/null 2>&1 &
+   ```
+   迭代 2+ 时加 `--previous-workspace <workspace>/iteration-<N-1>`
+4. **分析** — 参考 `agents/analyzer.md`，找出不区分 skill 效果的断言、高方差 eval、时间/token 权衡
+
+### Subagent 指令
+
+详细的 Grader / Comparator / Analyzer 指令见 `agents/` 目录，spawn subagent 时读取对应文件。
 
 ### 读取反馈
 
-用户反馈为空 = 满意。只关注有具体意见的测试用例。
+用户在 Viewer 点 "Submit All Reviews" 后生成 `feedback.json`。反馈为空 = 满意，只关注有具体意见的测试用例。
 
 ---
 
@@ -158,11 +173,18 @@ skill 功能稳定后，优化 description 的触发精度。
 
 关键：测试查询要足够具体和真实（有文件路径、个人背景、具体数据），不要抽象的一句话。负面用例要是"差点就该触发"的近似场景，而非明显无关的请求。
 
-### 迭代优化
+### 自动优化
 
-用测试集评估当前 description → 找出漏触发和误触发 → 改写 description → 重新测试 → 重复。
+```bash
+python -m scripts.run_loop \
+  --eval-set <trigger-eval.json> \
+  --skill-path <skill-path> \
+  --model <当前模型ID> \
+  --max-iterations 5 \
+  --verbose
+```
 
-展示 before/after 给用户确认。
+自动 5 轮迭代，60/40 train-test split，每条查询跑 3 次取稳定触发率。完成后输出 `best_description`，展示 before/after 给用户确认。
 
 ---
 
