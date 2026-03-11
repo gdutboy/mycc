@@ -22,6 +22,7 @@
 
 | 时间 | 任务 | Skill | 说明 |
 |------|------|-------|------|
+| 周日 22:00 | 私有库备份 | - | 执行 git add -A 然后 git commit 并 git push private main，将核心文件备份到私有库。跳过 .gitignore 排除的文件。提交信息格式：chore: 每周自动备份 YYYY-MM-DD |
 
 ## 一次性任务
 
