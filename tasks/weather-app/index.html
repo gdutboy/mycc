@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>天气预报</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --primary: #4a9eff;
+      --bg: #f5f7fa;
+      --card-bg: #ffffff;
+      --text: #333;
+      --text-secondary: #666;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    /* 头部 */
+    .header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .location {
+      color: var(--text-secondary);
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    .location-icon {
+      width: 14px;
+      height: 14px;
+    }
+
+    /* 加载状态 */
+    .loading {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-secondary);
+    }
+
+    .loading-spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid #e0e0e0;
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 16px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* 今日天气 */
+    .today {
+      background: var(--card-bg);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    }
+
+    .today-temp {
+      font-size: 56px;
+      font-weight: 300;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+
+    .today-temp span {
+      font-size: 24px;
+    }
+
+    .today-weather {
+      font-size: 18px;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+    }
+
+    .today-details {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    .detail-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+
+    /* 7天预报 */
+    .forecast {
+      background: var(--card-bg);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    }
+
+    .forecast-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .forecast-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .forecast-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      background: #fafafa;
+      border-radius: 12px;
+      transition: background 0.2s;
+    }
+
+    .forecast-item:hover {
+      background: #f0f0f0;
+    }
+
+    .forecast-date {
+      width: 80px;
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+
+    .forecast-date.today {
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .forecast-weather {
+      width: 60px;
+      font-size: 14px;
+    }
+
+    .forecast-temp {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .temp-bar {
+      flex: 1;
+      height: 4px;
+      background: linear-gradient(90deg, #4a9eff, #ff6b6b);
+      border-radius: 2px;
+      position: relative;
+    }
+
+    .temp-values {
+      width: 70px;
+      text-align: right;
+      font-size: 14px;
+    }
+
+    .temp-high {
+      color: #ff6b6b;
+      margin-right: 4px;
+    }
+
+    .temp-low {
+      color: #4a9eff;
+    }
+
+    /* 错误提示 */
+    .error {
+      text-align: center;
+      padding: 40px 20px;
+      color: #ff6b6b;
+    }
+
+    /* 图标 */
+    .icon {
+      width: 20px;
+      height: 20px;
+      vertical-align: middle;
+    }
+
+    /* 移动端适配 */
+    @media (max-width: 480px) {
+      body {
+        padding: 12px;
+      }
+
+      .today {
+        padding: 20px;
+      }
+
+      .today-temp {
+        font-size: 48px;
+      }
+
+      .today-details {
+        gap: 16px;
+      }
+
+      .forecast-item {
+        padding: 10px 12px;
+      }
+
+      .forecast-date {
+        width: 60px;
+        font-size: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>天气预报</h1>
+      <div class="location" id="location">
+        <svg class="location-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22c-4.97 0-9-4.03-9-9 0-3.87 2.5-7.21 6-8.3V4.5a1.5 1.5 0 013 0v.2c3.5 1.09 6 4.43 6 8.3 0 4.97-4.03 9-9 9z"/>
+        </svg>
+        <span id="cityName">定位中...</span>
+      </div>
+    </div>
+
+    <div class="loading" id="loading">
+      <div class="loading-spinner"></div>
+      <div>加载天气数据...</div>
+    </div>
+
+    <div class="error" id="error" style="display: none;"></div>
+
+    <div id="weatherContent" style="display: none;">
+      <!-- 今日天气 -->
+      <div class="today" id="today"></div>
+
+      <!-- 7天预报 -->
+      <div class="forecast">
+        <div class="forecast-title">7天预报</div>
+        <div class="forecast-list" id="forecast"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 和风天气 API Key（需要替换为你的 Key）
+    const API_KEY = 'YOUR_API_KEY'
+    const API_BASE = 'https://devapi.qweather.com/v7/weather'
+
+    // 天气图标映射
+    const weatherIcons = {
+      sunny: '☀️',
+      cloudy: '⛅',
+      overcast: '☁️',
+      shower: '🌧️',
+      thunderstorm: '⛈️',
+      'thunderstorm-hail': '⛈️',
+      'sleet': '🌧️️',
+      'light-rain': '🌧️',
+      'moderate-rain': '🌧️',
+      'heavy-rain': '🌧️',
+      'snow': '🌨️'
+    }
+
+    // 获取用户位置并加载天气
+    async function initWeather() {
+      if (!navigator.geolocation) {
+        showError('您的浏览器不支持定位功能')
+        return
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords
+          await loadWeather(latitude, longitude)
+        },
+        (error) => {
+          // 定位失败，使用默认城市
+          loadWeather(23.12, 113.25) // 广州
+        }
+      )
+    }
+
+    // 加载天气数据
+    async function loadWeather(lat, lon) {
+      try {
+        const [weatherRes, hourlyRes] = await Promise.all([
+          fetch(`${API_BASE}/7d?location=${lon},${lat}&key=${API_KEY}`),
+          fetch(`${API_BASE}/24h?location=${lon},${lat}&key=${API_KEY}`)
+        ])
+
+        if (!weatherRes.ok) {
+          throw new Error('获取天气数据失败')
+        }
+
+        const weatherData = await weatherRes.json()
+
+        // 更新城市名
+        document.getElementById('cityName').textContent = weatherData.location.name
+
+        // 渲染天气
+        renderWeather(weatherData)
+
+        document.getElementById('loading').style.display = 'none'
+        document.getElementById('weatherContent').style.display = 'block'
+      } catch (error) {
+        // API 调用失败，使用模拟数据演示
+        renderMockData()
+      }
+    }
+
+    // 渲染天气数据
+    function renderWeather(data) {
+      const today = data.daily[0]
+      const daily = data.daily
+
+      // 今日天气
+      const todayEl = document.getElementById('today')
+      todayEl.innerHTML = `
+        <div class="today-temp">${today.tempMax}°<span>/${today.tempMin}°</span></div>
+        <div class="today-weather">${today.textDay}</div>
+        <div class="today-details">
+          <div class="detail-item">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z"/>
+            </svg>
+            湿度 ${today.humidity}%
+          </div>
+          <div class="detail-item">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9.59 4.59A2 2 0 1111 8H2m10.59 11.41A2 2 0 1014 16H2m15.73-8.27A2.5 2.5 0 1119.5 12H2"/>
+            </svg>
+            ${today.windDir} ${today.windScale}
+          </div>
+          <div class="detail-item">
+            紫外线 ${today.uvIndex || '中'}
+          </div>
+        </div>
+      `
+
+      // 7天预报
+      const forecastEl = document.getElementById('forecast')
+      const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+      forecastEl.innerHTML = daily.map((day, index) => {
+        const date = new Date(day.fxDate)
+        const dayName = index === 0 ? '今天' : (index === 1 ? '明天' : weekDays[date.getDay()])
+        const tempPercent = ((day.tempMax - day.tempMin) / 40) * 100
+
+        return `
+          <div class="forecast-item">
+            <div class="forecast-date ${index === 0 ? 'today' : ''}">${dayName}</div>
+            <div class="forecast-weather">${day.textDay}</div>
+            <div class="forecast-temp">
+              <div class="temp-bar" style="margin-left: ${tempPercent}%"></div>
+            </div>
+            <div class="temp-values">
+              <span class="temp-high">${day.tempMax}°</span>
+              <span class="temp-low">${day.tempMin}°</span>
+            </div>
+          </div>
+        `
+      }).join('')
+    }
+
+    // 模拟数据（API 不可用时使用）
+    function renderMockData() {
+      const mockData = {
+        location: { name: '广州市' },
+        daily: [
+          { fxDate: '2026-03-08', tempMax: 28, tempMin: 19, textDay: '晴', humidity: 65, windDir: '东南风', windScale: '3级' },
+          { fxDate: '2026-03-09', tempMax: 27, tempMin: 18, textDay: '多云', humidity: 70, windDir: '东风', windScale: '2级' },
+          { fxDate: '2026-03-10', tempMax: 25, tempMin: 17, textDay: '阴', humidity: 75, windDir: '东北风', windScale: '3级' },
+          { fxDate: '2026-03-11', tempMax: 24, tempMin: 16, textDay: '小雨', humidity: 85, windDir: '北风', windScale: '4级' },
+          { fxDate: '2026-03-12', tempMax: 26, tempMin: 17, textDay: '多云', humidity: 68, windDir: '北风', windScale: '2级' },
+          { fxDate: '2026-03-13', tempMax: 28, tempMin: 19, textDay: '晴', humidity: 60, windDir: '东南风', windScale: '2级' },
+          { fxDate: '2026-03-14', tempMax: 29, tempMin: 20, textDay: '晴', humidity: 58, windDir: '南风', windScale: '3级' }
+        ]
+      }
+
+      document.getElementById('cityName').textContent = mockData.location.name
+
+      const todayEl = document.getElementById('today')
+      todayEl.innerHTML = `
+        <div class="today-temp">28°<span>/19°</span></div>
+        <div class="today-weather">晴</div>
+        <div class="today-details">
+          <div class="detail-item">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z"/>
+            </svg>
+            湿度 65%
+          </div>
+          <div class="detail-item">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9.59 4.59A2 2 0 1111 8H2m10.59 11.41A2 2 0 1014 16H2m15.73-8.27A2.5 2.5 0 1119.5 12H2"/>
+            </svg>
+            东南风 3级
+          </div>
+          <div class="detail-item">
+            紫外线 中
+          </div>
+        </div>
+      `
+
+      const forecastEl = document.getElementById('forecast')
+      const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+      forecastEl.innerHTML = mockData.daily.map((day, index) => {
+        const date = new Date(day.fxDate)
+        const dayName = index === 0 ? '今天' : (index === 1 ? '明天' : weekDays[date.getDay()])
+        const tempPercent = ((day.tempMax - day.tempMin) / 40) * 100
+
+        return `
+          <div class="forecast-item">
+            <div class="forecast-date ${index === 0 ? 'today' : ''}">${dayName}</div>
+            <div class="forecast-weather">${day.textDay}</div>
+            <div class="forecast-temp">
+              <div class="temp-bar" style="margin-left: ${tempPercent}%"></div>
+            </div>
+            <div class="temp-values">
+              <span class="temp-high">${day.tempMax}°</span>
+              <span class="temp-low">${day.tempMin}°</span>
+            </div>
+          </div>
+        `
+      }).join('')
+
+      document.getElementById('loading').style.display = 'none'
+      document.getElementById('weatherContent').style.display = 'block'
+    }
+
+    function showError(message) {
+      document.getElementById('loading').style.display = 'none'
+      document.getElementById('error').style.display = 'block'
+      document.getElementById('error').textContent = message
+    }
+
+    // 初始化
+    initWeather()
+  </script>
+</body>
+</html>

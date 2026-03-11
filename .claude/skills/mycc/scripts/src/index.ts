@@ -33,7 +33,8 @@ import { adapter } from "./adapters/index.js";
 import { CloudflareProvider } from "./tunnel-provider.js";
 import { TunnelManager } from "./tunnel-manager.js";
 import { loadPublicUrl, loadEnvFile } from "./env-loader.js";
-import { initNotificationSystem, sendNotification, isTerminalInForeground } from "./notification.js";
+// notification.ts 已被 paceaitian 的 Claude Code Hook 方案替代，禁用以防重叠通知
+// import { initNotificationSystem, sendNotification, isTerminalInForeground } from "./notification.js";
 
 const PORT = process.env.PORT || 18080;
 const WORKER_URL = process.env.WORKER_URL || "https://api.mycc.dev";
@@ -217,27 +218,10 @@ async function startServer(args: string[]) {
     throw error;
   }
 
-  // 初始化通知系统
-  initNotificationSystem();
-
-  // 启动成功后，发送通知（如果终端不在前台）
+  // 通知已由 paceaitian Hook 方案接管（~/.claude/settings.json Notification/Stop Hook）
   const sessionName = basename(cwd);
-  sendNotification({
-    sessionId: sessionName,
-    title: 'CC 已启动',
-    message: `mycc 后端已运行: ${sessionName}`,
-    type: 'general',
-  });
-
-  // 发送退出通知的辅助函数
-  const sendStopNotification = () => {
-    sendNotification({
-      sessionId: sessionName,
-      title: 'CC 已停止',
-      message: `mycc 后端已退出: ${sessionName}`,
-      type: 'stop',
-    });
-  };
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  const sendStopNotification = () => {};
 
   // 记录任务执行历史到 history.md
 

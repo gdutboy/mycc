@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>计算器</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 min-h-screen flex items-center justify-center p-4">
+  <div class="bg-gray-800 rounded-2xl p-6 shadow-2xl w-full max-w-sm">
+    <h1 class="text-2xl font-bold text-white text-center mb-6">计算器</h1>
+
+    <div class="bg-gray-700 rounded-xl p-4 mb-6">
+      <div id="display" class="text-right text-4xl font-mono text-white truncate">0</div>
+    </div>
+
+    <div class="grid grid-cols-4 gap-3">
+      <button onclick="handleOp('C')" class="h-14 rounded-xl text-xl font-bold bg-red-500 hover:bg-red-600 text-white transition-all">C</button>
+      <button onclick="handleOp('/')" class="h-14 rounded-xl text-xl font-bold bg-gray-600 hover:bg-gray-500 text-white transition-all">/</button>
+      <button onclick="handleOp('*')" class="h-14 rounded-xl text-xl font-bold bg-gray-600 hover:bg-gray-500 text-white transition-all">×</button>
+      <button onclick="handleOp('-')" class="h-14 rounded-xl text-xl font-bold bg-gray-600 hover:bg-gray-500 text-white transition-all">-</button>
+
+      <button onclick="handleNum('7')" class="h-14 rounded-xl text-xl font-bold bg-gray-700 hover:bg-gray-600 text-white transition-all">7</button>
+      <button onclick="handleNum('8')" class="h-14 rounded-xl text-xl font-bold bg-gray-700 hover:bg-gray-600 text-white transition-all">8</button>
+      <button onclick="handleNum('9')" class="h-14 rounded-xl text-xl font-bold bg-gray-700 hover:bg-gray-600 text-white transition-all">9</button>
+      <button onclick="handleOp('+')" class="h-14 rounded-xl text-xl font-bold bg-gray-600 hover:bg-gray-500 text-white transition-all row-span-2">+</button>
+
+      <button onclick="handleNum('4')" class="h-14 rounded-xl text-xl font-bold bg-gray-700 hover:bg-gray-600 text-white transition-all">4</button>
+      <button onclick="handleNum('5')" class="h-14 rounded-xl text-xl font-bold bg-gray-700 hover:bg-gray-600 text-white transition-all">5</button>
+      <button onclick="handleNum('6')" class="h-14 rounded-xl text-xl font-bold bg-gray-700 hover:bg-gray-600 text-white transition-all">6</button>
+
+      <button onclick="handleNum('1')" class="h-14 rounded-xl text-xl font-bold bg-gray-700 hover:bg-gray-600 text-white transition-all">1</button>
+      <button onclick="handleNum('2')" class="h-14 rounded-xl text-xl font-bold bg-gray-700 hover:bg-gray-600 text-white transition-all">2</button>
+      <button onclick="handleNum('3')" class="h-14 rounded-xl text-xl font-bold bg-gray-700 hover:bg-gray-600 text-white transition-all">3</button>
+      <button onclick="handleOp('=')" class="h-14 rounded-xl text-xl font-bold bg-orange-500 hover:bg-orange-600 text-white transition-all row-span-2">=</button>
+
+      <button onclick="handleNum('0')" class="h-14 rounded-xl text-xl font-bold bg-gray-700 hover:bg-gray-600 text-white transition-all col-span-2">0</button>
+      <button onclick="handleNum('.')" class="h-14 rounded-xl text-xl font-bold bg-gray-700 hover:bg-gray-600 text-white transition-all">.</button>
+    </div>
+  </div>
+
+  <script>
+    let display = '0';
+    let firstOperand = null;
+    let operation = null;
+    let waitingForSecond = false;
+
+    const displayEl = document.getElementById('display');
+
+    function updateDisplay() {
+      displayEl.textContent = display;
+    }
+
+    function handleNum(num) {
+      if (waitingForSecond) {
+        display = num;
+        waitingForSecond = false;
+      } else {
+        display = display === '0' ? num : display + num;
+      }
+      updateDisplay();
+    }
+
+    function handleOp(op) {
+      if (op === 'C') {
+        display = '0';
+        firstOperand = null;
+        operation = null;
+        waitingForSecond = false;
+        updateDisplay();
+        return;
+      }
+
+      if (op === '=') {
+        if (firstOperand === null || operation === null) return;
+
+        const secondOperand = parseFloat(display);
+        let result;
+
+        switch (operation) {
+          case '+': result = firstOperand + secondOperand; break;
+          case '-': result = firstOperand - secondOperand; break;
+          case '*': result = firstOperand * secondOperand; break;
+          case '/':
+            if (secondOperand === 0) {
+              display = 'Error';
+              updateDisplay();
+              return;
+            }
+            result = firstOperand / secondOperand;
+            break;
+        }
+
+        display = String(result);
+        firstOperand = null;
+        operation = null;
+        updateDisplay();
+        return;
+      }
+
+      if (operation && firstOperand !== null && !waitingForSecond) {
+        const secondOperand = parseFloat(display);
+        let result;
+
+        switch (operation) {
+          case '+': result = firstOperand + secondOperand; break;
+          case '-': result = firstOperand - secondOperand; break;
+          case '*': result = firstOperand * secondOperand; break;
+          case '/':
+            if (secondOperand === 0) {
+              display = 'Error';
+              updateDisplay();
+              return;
+            }
+            result = firstOperand / secondOperand;
+            break;
+        }
+
+        firstOperand = result;
+        display = String(result);
+      } else {
+        firstOperand = parseFloat(display);
+      }
+
+      operation = op;
+      waitingForSecond = true;
+      updateDisplay();
+    }
+
+    // 键盘支持
+    document.addEventListener('keydown', (e) => {
+      if (e.key >= '0' && e.key <= '9' || e.key === '.') {
+        handleNum(e.key);
+      } else if (e.key === '+' || e.key === '-') {
+        handleOp(e.key);
+      } else if (e.key === '*') {
+        handleOp('*');
+      } else if (e.key === '/') {
+        handleOp('/');
+      } else if (e.key === 'Enter' || e.key === '=') {
+        handleOp('=');
+      } else if (e.key === 'Escape') {
+        handleOp('C');
+      } else if (e.key === 'Backspace') {
+        display = display.length > 1 ? display.slice(0, -1) : '0';
+        updateDisplay();
+      }
+    });
+  </script>
+</body>
+</html>

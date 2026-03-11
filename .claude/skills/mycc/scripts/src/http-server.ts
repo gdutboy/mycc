@@ -7,7 +7,7 @@ import http from "http";
 import https from "https";
 import os from "os";
 import { join } from "path";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, writeFileSync, unlinkSync } from "fs";
 import { generateToken } from "./utils.js";
 import { adapter } from "./adapters/index.js";
 import type { PairState } from "./types.js";
@@ -15,6 +15,7 @@ import { validateImages, type ImageData } from "./image-utils.js";
 import { renameSession, getHistoryDir, scanSessionFiles } from "./history.js";
 import { listSkills } from "./skills.js";
 import { ChannelManager } from "./channels/manager.js";
+import { getTaskLock } from "./scheduler.js";
 import { WebChannel } from "./channels/web.js";
 import { loadConfig } from "./config.js";
 import { SessionStats } from "./session-stats.js";
@@ -34,6 +35,54 @@ const pairAttempts = new Map<string, { count: number; lockedUntil: number }>();
 
 /** 测试用：重置速率限制状态 */
 export function _resetPairAttempts() { pairAttempts.clear(); }
+
+// 飞书通道独占锁
+const FEISHU_LOCK_FILE = join(process.cwd(), ".claude", "skills", "mycc", "feishu.lock");
+
+/** 尝试获取飞书独占锁，成功返回 true */
+function acquireFeishuLock(): boolean {
+  try {
+    if (existsSync(FEISHU_LOCK_FILE)) {
+      const content = readFileSync(FEISHU_LOCK_FILE, "utf-8");
+      const lockData = JSON.parse(content);
+      // 检查持锁进程是否还活着
+      try {
+        process.kill(lockData.pid, 0); // 不发信号，仅检查进程存在
+        // 进程还在，锁有效
+        return false;
+      } catch {
+        // 进程已死，锁过期，可以抢占
+        console.log(`[FeishuLock] 旧锁进程 ${lockData.pid} 已退出，接管飞书通道`);
+      }
+    }
+    // 写入锁文件
+    writeFileSync(FEISHU_LOCK_FILE, JSON.stringify({
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+    }));
+    return true;
+  } catch (err) {
+    console.warn("[FeishuLock] 获取锁失败:", err);
+    return false;
+  }
+}
+
+/** 释放飞书独占锁 */
+function releaseFeishuLock(): void {
+  try {
+    if (existsSync(FEISHU_LOCK_FILE)) {
+      const content = readFileSync(FEISHU_LOCK_FILE, "utf-8");
+      const lockData = JSON.parse(content);
+      // 只释放自己持有的锁
+      if (lockData.pid === process.pid) {
+        unlinkSync(FEISHU_LOCK_FILE);
+        console.log("[FeishuLock] 已释放飞书通道锁");
+      }
+    }
+  } catch {
+    // 静默处理
+  }
+}
 
 export class HttpServer {
   private server: http.Server | https.Server;
@@ -171,6 +220,8 @@ export class HttpServer {
         this.handleEvents(req, res);
       } else if (url.pathname === "/status" && req.method === "GET") {
         await this.handleStatus(req, res);
+      } else if (url.pathname === "/scheduler/retrigger" && req.method === "POST") {
+        await this.handleSchedulerRetrigger(req, res);
       } else {
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Not Found" }));
@@ -255,6 +306,13 @@ export class HttpServer {
   }
 
   private async handleChat(req: http.IncomingMessage, res: http.ServerResponse) {
+    // 渠道开关检查
+    if (process.env.CHANNEL_WEB === "false") {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Web channel is disabled" }));
+      return;
+    }
+
     // 验证 token
     const authHeader = req.headers.authorization;
     const token = authHeader?.replace("Bearer ", "");
@@ -351,6 +409,11 @@ export class HttpServer {
               status: isError ? "error" : "success",
               ts: Date.now(),
             });
+
+            // 兜底处理：MiniMax 模型无法读取图片 URL 时自动下载重试
+            if (isError && images && images.length > 0 && model && model.toLowerCase().includes("mini")) {
+              await this.handleImageRetry(data, images, currentSessionId!, sessionId, model, webChannel);
+            }
           }
 
           // 拦截 assistant 消息 → 累计消息计数
@@ -389,6 +452,130 @@ export class HttpServer {
       this.channelManager.unregister(webChannelId);
       console.error(`[CC] 错误: ${errMsg}`);
     }
+  }
+
+  /**
+   * 兜底处理：MiniMax 模型无法读取图片 URL 时自动下载重试
+   */
+  private async handleImageRetry(
+    toolResult: any,
+    originalImages: ImageData[],
+    sessionId: string,
+    originalSessionId: string | undefined,
+    model: string,
+    webChannel: WebChannel
+  ): Promise<void> {
+    try {
+      // 提取 tool_result 中的内容
+      const content = toolResult.content;
+      if (!content) return;
+
+      // 将 content 转换为字符串
+      const contentText = Array.isArray(content)
+        ? content.map((c: any) => c.text || "").join("")
+        : String(content);
+
+      // 检测是否是图片读取错误
+      const imageErrorPatterns = [
+        "无法读取这个网络图片",
+        "无法直接读取这个网络图片",
+        "无法读取这个图片 URL",
+        "I cannot directly read this image URL",
+        "I cannot access this URL",
+        "抱歉，我无法直接读取",
+      ];
+
+      const isImageError = imageErrorPatterns.some((pattern) =>
+        contentText.toLowerCase().includes(pattern.toLowerCase())
+      );
+
+      if (!isImageError) return;
+
+      // 提取图片 URL
+      const urlMatch = contentText.match(/https?:\/\/[^\s\)"\]]+/);
+      if (!urlMatch) {
+        console.log("[CC] 兜底: 无法提取图片 URL");
+        return;
+      }
+
+      const imageUrl = urlMatch[0];
+      console.log(`[CC] 兜底: 检测到图片读取失败，尝试下载: ${imageUrl.substring(0, 50)}...`);
+
+      // 下载图片
+      const downloadedImage = await this.downloadImage(imageUrl);
+      if (!downloadedImage) {
+        console.log("[CC] 兜底: 图片下载失败");
+        return;
+      }
+
+      // 重新调用模型分析（使用下载的图片替换原始图片）
+      const retryImages = [downloadedImage];
+      console.log(`[CC] 兜底: 重新调用模型分析图片 (${downloadedImage.mediaType})`);
+
+      // 发送提示
+      await webChannel.send({
+        type: "text",
+        text: "\n\n🔄 MiniMax 模型无法直接读取网络图片，正在使用下载的图片重新分析...",
+      } as any);
+
+      // 重新调用模型
+      const retryMessage = "请分析这张图片";
+      for await (const data of adapter.chat({
+        message: retryMessage,
+        sessionId: sessionId + "_retry",
+        cwd: this.cwd,
+        images: retryImages,
+        model: model, // 仍然使用 MiniMax，但这次直接传图片数据
+      })) {
+        // 发送重试结果
+        await webChannel.send(data);
+      }
+
+      console.log("[CC] 兜底: 图片重试完成");
+    } catch (error) {
+      console.error("[CC] 兜底处理失败:", error);
+    }
+  }
+
+  /**
+   * 从 URL 下载图片
+   */
+  private async downloadImage(url: string): Promise<ImageData | null> {
+    return new Promise((resolve) => {
+      const protocol = url.startsWith("https") ? https : http;
+
+      protocol.get(url, { timeout: 30000 }, (res) => {
+        // 处理重定向
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          const redirectUrl = res.headers.location;
+          if (redirectUrl) {
+            this.downloadImage(redirectUrl).then(resolve).catch(() => resolve(null));
+            return;
+          }
+        }
+
+        if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+          console.error(`[CC] 下载图片失败: HTTP ${res.statusCode}`);
+          resolve(null);
+          return;
+        }
+
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          const buffer = Buffer.concat(chunks);
+          const mediaType = res.headers["content-type"] || "image/png";
+          console.log(`[CC] 图片下载成功: ${buffer.length} bytes (${mediaType})`);
+          resolve({
+            data: buffer.toString("base64"),
+            mediaType: mediaType,
+          });
+        });
+      }).on("error", (error) => {
+        console.error("[CC] 下载图片出错:", error.message);
+        resolve(null);
+      });
+    });
   }
 
   private async handleHistoryList(req: http.IncomingMessage, res: http.ServerResponse) {
@@ -577,6 +764,37 @@ export class HttpServer {
   /**
    * 系统状态快照端点
    */
+  private async handleSchedulerRetrigger(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.replace("Bearer ", "");
+
+    if (!this.state.paired || token !== this.state.token) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "未授权" }));
+      return;
+    }
+
+    const body = await this.readBody(req);
+    const { taskName } = JSON.parse(body);
+
+    if (!taskName) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "缺少 taskName 参数" }));
+      return;
+    }
+
+    const lock = getTaskLock();
+    if (!lock) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "调度器未启动" }));
+      return;
+    }
+
+    const released = lock.release(taskName);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, released, message: released ? `已释放「${taskName}」的锁，下次检查时将重新触发` : `未找到「${taskName}」的锁` }));
+  }
+
   private async handleStatus(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const authHeader = req.headers.authorization;
     const token = authHeader?.replace("Bearer ", "");
@@ -710,19 +928,25 @@ export class HttpServer {
         console.log(`[${this.isTls ? "HTTPS" : "HTTP"}] 服务启动在端口 ${port}`);
 
         // 动态加载并注册飞书通道（如果配置了环境变量）
-        if (process.env.FEISHU_APP_ID && process.env.FEISHU_APP_SECRET) {
-          try {
-            const { FeishuChannel } = await import("./channels/feishu.js");
-            this.feishuChannel = new FeishuChannel();
-            this.feishuChannel.onMessage(async (message: string, images?: Array<{ data: string; mediaType: string }>) => {
-              await this.feishuCommands.processMessage(message, images);
-            });
-            this.channelManager.register(this.feishuChannel);
-            // 注入 feishuChannel 到 FeishuCommands（延迟注入）
-            (this.feishuCommands as any).deps.feishuChannel = this.feishuChannel;
-            console.log("[Channels] 飞书通道已注册");
-          } catch (err) {
-            console.warn("[Channels] 飞书通道加载失败:", err);
+        if (process.env.CHANNEL_FEISHU !== "false" && process.env.FEISHU_APP_ID && process.env.FEISHU_APP_SECRET) {
+          // 独占锁：同一时间只允许一个实例连接飞书
+          if (!acquireFeishuLock()) {
+            console.log("[Channels] 飞书通道已被其他 MYCC 实例占用，本实例跳过飞书");
+          } else {
+            try {
+              const { FeishuChannel } = await import("./channels/feishu.js");
+              this.feishuChannel = new FeishuChannel();
+              this.feishuChannel.onMessage(async (message: string, images?: Array<{ data: string; mediaType: string }>, messageId?: string) => {
+                await this.feishuCommands.processMessage(message, images, messageId);
+              });
+              this.channelManager.register(this.feishuChannel);
+              // 注入 feishuChannel 到 FeishuCommands（延迟注入）
+              (this.feishuCommands as any).deps.feishuChannel = this.feishuChannel;
+              console.log("[Channels] 飞书通道已注册（独占模式）");
+            } catch (err) {
+              releaseFeishuLock();
+              console.warn("[Channels] 飞书通道加载失败:", err);
+            }
           }
         } else {
           console.log("[Channels] 飞书通道未配置");
@@ -760,6 +984,9 @@ export class HttpServer {
 
     // 停止所有通道
     this.channelManager.stopAll();
+
+    // 释放飞书独占锁
+    releaseFeishuLock();
 
     this.server.close();
   }

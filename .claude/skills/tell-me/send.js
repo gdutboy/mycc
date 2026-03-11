@@ -5,16 +5,39 @@
  * 颜色: blue(默认), green, orange, red
  */
 
-const [,, title, content, color = 'blue'] = process.argv;
+const fs = require('fs');
+const path = require('path');
+
+let title, content, color = 'blue';
+
+// 检查是否有 --file 参数
+const fileIndex = process.argv.indexOf('--file');
+if (fileIndex !== -1 && process.argv.length > fileIndex + 2) {
+  // --file 模式：读取文件内容
+  title = process.argv[fileIndex + 1];
+  const filePath = process.argv[fileIndex + 2];
+  color = process.argv[fileIndex + 3] || 'blue';
+
+  try {
+    content = fs.readFileSync(filePath, 'utf8');
+  } catch (err) {
+    console.error('❌ 无法读取文件:', err.message);
+    process.exit(1);
+  }
+} else {
+  // 普通模式
+  [, , title, content, color = 'blue'] = process.argv;
+  // 命令行参数中的 \n 是字面字符串，转成真换行
+  if (content) content = content.replace(/\\n/g, '\n');
+}
 
 if (!title || !content) {
   console.error('用法: node send.js "标题" "内容" [颜色]');
+  console.error('   或: node send.js --file "标题" "文件路径" [颜色]');
   process.exit(1);
 }
 
 // 读取配置文件
-const fs = require('fs');
-const path = require('path');
 const configPath = path.join(__dirname, 'config.json');
 
 let webhook;
@@ -34,24 +57,35 @@ if (!webhook || webhook === 'YOUR_FEISHU_WEBHOOK_HERE') {
   process.exit(1);
 }
 
+// Schema 2.0 颜色映射
+const headerTemplates = {
+  blue: 'blue',
+  green: 'green',
+  orange: 'orange',
+  red: 'red',
+};
+
 const card = {
   msg_type: 'interactive',
   card: {
+    schema: '2.0',
+    config: { wide_screen_mode: true },
     header: {
       title: { content: `📌 ${title}`, tag: 'plain_text' },
-      template: color
+      template: headerTemplates[color] || 'blue',
     },
-    elements: [
-      {
-        tag: 'div',
-        text: { content, tag: 'lark_md' }
-      },
-      {
-        tag: 'note',
-        elements: [{ tag: 'plain_text', content: `⏰ ${new Date().toLocaleString('zh-CN')}` }]
-      }
-    ]
-  }
+    body: {
+      elements: [
+        { tag: 'markdown', content },
+        { tag: 'hr' },
+        {
+          tag: 'markdown',
+          content: `⏰ ${new Date().toLocaleString('zh-CN')}`,
+          text_size: 'notation',
+        },
+      ],
+    },
+  },
 };
 
 fetch(webhook, {

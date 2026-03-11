@@ -13,8 +13,11 @@ from pathlib import Path
 from datetime import datetime
 
 # 路径配置 - 使用环境变量或相对路径
-BASE_DIR = Path(os.environ.get("CC_PROJECT_DIR", Path(__file__).parent.parent.parent.parent))
-DASHBOARD_PATH = BASE_DIR / ".claude/DASHBOARD.md"
+# 脚本在: .claude/skills/dashboard/scripts/visualize.py
+# 需要回到项目根目录: 4 层 parent (scripts -> dashboard -> skills -> .claude -> mycc)
+_script_dir = Path(__file__).resolve().parent
+BASE_DIR = _script_dir.parent.parent.parent.parent
+DASHBOARD_PATH = BASE_DIR / ".claude" / "DASHBOARD.md"
 
 
 def parse_dashboard():

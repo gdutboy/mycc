@@ -375,6 +375,21 @@ export class TaskLock {
   }
 
   /**
+   * 释放指定任务的锁，允许重新执行
+   * @returns true 表示找到并释放了锁
+   */
+  release(taskName: string): boolean {
+    let found = false;
+    for (const key of this.executed) {
+      if (key.startsWith(`${taskName}|`)) {
+        this.executed.delete(key);
+        found = true;
+      }
+    }
+    return found;
+  }
+
+  /**
    * 清空所有锁（用于测试）
    */
   clear(): void {
@@ -390,6 +405,11 @@ const CHECK_INTERVAL = 60 * 1000; // 1 分钟
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
 let taskLock: TaskLock | null = null;
+
+/** 获取当前 TaskLock 实例（用于手动释放锁） */
+export function getTaskLock(): TaskLock | null {
+  return taskLock;
+}
 
 export type ExecuteTaskFn = (task: Task, cwd: string) => void | Promise<void>;
 

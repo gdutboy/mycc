@@ -1,6 +1,6 @@
 ---
 name: dashboard
-description: 可视化查看 cc 能力看板。触发词："/dashboard"、"看看能力看板"、"cc 能力"、"技能看板"
+description: 可视化查看 cc 技能能力看板
 ---
 
 # cc 能力看板可视化

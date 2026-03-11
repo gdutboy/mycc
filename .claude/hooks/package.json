@@ -1,0 +1,10 @@
+{
+  "name": "mycc-hooks",
+  "version": "1.0.0",
+  "description": "MYCC Hooks for PACE workflow",
+  "type": "module",
+  "scripts": {
+    "pre-write": "node pre-write-check.js",
+    "stop": "node stop-check.js"
+  }
+}

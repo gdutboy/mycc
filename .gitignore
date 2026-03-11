@@ -1,4 +1,13 @@
 # ====================================
+# 嵌套 git 仓库（不纳入主仓库）
+# ====================================
+airi/
+1-Inbox/CLI-Anything/
+5-Archive/微信机器人开发/2026-03-05/WeChat-AI-Bot/
+5-Archive/微信机器人开发/2026-03-05/WeChat-MCP-Server/
+5-Archive/微信机器人开发/2026-03-05/WeChatBot-New/
+
+# ====================================
 # 通用规则
 # ====================================
 .idea/
@@ -118,3 +127,5 @@ update-cmd-gitbash.ps1
 ieee.png
 ieee_results.html
 package-lock.json
+2-Projects/stockquant-v3-phase3-implementation/cloudfunctions/aiPricePredictor/real_stock_data_enhanced_v2.json
+2-Projects/stockquant-v3-phase3-implementation/cloudfunctions/aiPricePredictor/real_stock_data_v3_large.json

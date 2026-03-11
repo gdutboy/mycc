@@ -1,13 +1,17 @@
 ---
 name: cc-usage
-description: 查看 Claude Code 的 token 用量统计。按日期×模型维度拆分，支持按天数、项目过滤。触发词："/cc-usage"、"看看用量"、"token 消耗"、"用量统计"
+description: 查看 Claude Code token 用量统计
+layer: 基础层
+authorization: A区（自动执行，无需人类介入）
+output_levels: L1（结论）
+status: active
+created: 2026-02-15
+origin: 日常对话需求
 ---
 
 # cc-usage — Token 用量统计
 
-扫描本地 Claude Code 日志（`~/.claude/projects/`），按 **日期 × 模型** 维度统计 token 消耗和 API 等价费用。
-
-纯 Python 3 脚本，无需安装任何依赖，跨平台（Mac / Linux / Windows）。
+> 原子工具：扫描本地 Claude Code 日志，统计 token 消耗和费用。
 
 ## 触发词
 
@@ -53,17 +57,42 @@ python3 .claude/skills/cc-usage/scripts/analyzer.py --summary
 
 ## 输出要求
 
-脚本跑完后，AI 应该：
-1. 把关键数据整理成 Markdown 表格（按天 × 模型）
-2. 给出日小计和总计
-3. 附上模型汇总（哪个模型最费钱）
-4. 如有异常（某天突然暴涨），主动指出
+脚本跑完后，整理成以下固定格式的 Markdown 表格：
+
+```
+| 日期 | Opus 4.6 | Sonnet 4.6 | 合计 | 合计 | 费用 |
+|------|----------|------------|------|------|------|
+| 03-04 | 28.7M | 56.6M | 85.3M | 0.85亿 | $65.26 |
+| **总计** | **1,044M** | **218M** | **1,262M** | **12.62亿** | **$1,052** |
+```
+
+**格式规则**：
+1. 模型列固定两列：Opus 4.6、Sonnet 4.6（如有新模型再加列）
+2. 数值统一带单位：M（百万 token）或 亿
+3. 合计列出两遍：一列 M 单位，一列 亿 单位（1亿 = 100M）
+4. 无数据的模型列填 `—`
+5. 如有异常（某天突然暴涨），在表格下方主动指出
 
 ## 跨平台说明
 
 - 路径：使用 `os.path.expanduser('~')` 自动适配
 - 时区：使用 `datetime.astimezone()` 自动检测系统本地时区
 - 依赖：仅 Python 3 标准库，无需 pip install
+
+## 产出格式
+
+`[cc-usage] 最近 N 天用量统计`（后接 Markdown 表格）
+
+## 边界
+
+- **资源预算**：执行不超过 1 分钟
+- **产出前缀**：`[cc-usage]`
+
+## 不做的事
+
+- 不修改日志文件（只读）
+- 不对外发送用量数据
+- 不在没有日志的情况下编造数据
 
 ## 维护提示
 
