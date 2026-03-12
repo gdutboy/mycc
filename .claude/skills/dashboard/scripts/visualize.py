@@ -51,16 +51,33 @@ def parse_dashboard():
         "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
 
-    # 解析已实装技能
-    skill_pattern = r'\| `([^`]+)` \| ([^|]+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \|'
-    for match in re.finditer(skill_pattern, content):
-        data["skills"].append({
-            "name": match.group(1).strip(),
-            "desc": match.group(2).strip(),
-            "version": match.group(3).strip(),
-            "date": match.group(4).strip(),
-            "status": match.group(5).strip(),
-        })
+    # 解析已实装技能（支持 3 列和 5 列两种格式）
+    # 3 列：| `/name` | 功能 | 状态 |
+    skill_pattern_3 = r'\| `([^`]+)` \| ([^|]+) \| ([^|]+) \|'
+    # 5 列：| `/name` | 功能 | 版本 | 日期 | 状态 |
+    skill_pattern_5 = r'\| `([^`]+)` \| ([^|]+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \|'
+    # 先尝试 5 列
+    matches_5 = list(re.finditer(skill_pattern_5, content))
+    if matches_5:
+        for match in matches_5:
+            data["skills"].append({
+                "name": match.group(1).strip(),
+                "desc": match.group(2).strip(),
+                "version": match.group(3).strip(),
+                "date": match.group(4).strip(),
+                "status": match.group(5).strip(),
+            })
+    else:
+        for match in re.finditer(skill_pattern_3, content):
+            name = match.group(1).strip()
+            if name.startswith('/'):
+                data["skills"].append({
+                    "name": name,
+                    "desc": match.group(2).strip(),
+                    "version": "",
+                    "date": "",
+                    "status": match.group(3).strip(),
+                })
 
     # 解析开发中
     dev_section = re.search(r'## 开发中\n\n(.*?)(?=\n---|\n## )', content, re.DOTALL)
@@ -74,19 +91,34 @@ def parse_dashboard():
                 "doc": match.group(4).strip(),
             })
 
-    # 解析规划中
-    plan_section = re.search(r'## 规划中.*?\n\n(.*?)(?=\n---|\n## )', content, re.DOTALL)
+    # 解析规划中（支持 3 列和 4 列）
+    plan_section = re.search(r'## 规划中.*?\n\n(.*?)(?=\n---|\n## |\Z)', content, re.DOTALL)
     if plan_section:
-        plan_pattern = r'\| ([^|]+) \| ([^|]+) \| ([^|]+) \| `([^`]+)` \|'
-        for match in re.finditer(plan_pattern, plan_section.group(1)):
-            name = match.group(1).strip()
-            if name and not name.startswith('--'):
-                data["planned"].append({
-                    "name": name,
-                    "desc": match.group(2).strip(),
-                    "priority": match.group(3).strip(),
-                    "source": match.group(4).strip(),
-                })
+        # 3 列：| 想法 | 描述 | 优先级 |
+        plan_pattern_3 = r'\| ([^|]+) \| ([^|]+) \| ([^|]+) \|'
+        # 4 列：| 想法 | 描述 | 优先级 | `doc` |
+        plan_pattern_4 = r'\| ([^|]+) \| ([^|]+) \| ([^|]+) \| `([^`]+)` \|'
+        matches_4 = list(re.finditer(plan_pattern_4, plan_section.group(1)))
+        if matches_4:
+            for match in matches_4:
+                name = match.group(1).strip()
+                if name and not name.startswith('--'):
+                    data["planned"].append({
+                        "name": name,
+                        "desc": match.group(2).strip(),
+                        "priority": match.group(3).strip(),
+                        "source": match.group(4).strip(),
+                    })
+        else:
+            for match in re.finditer(plan_pattern_3, plan_section.group(1)):
+                name = match.group(1).strip()
+                if name and not name.startswith('--') and name != '想法':
+                    data["planned"].append({
+                        "name": name,
+                        "desc": match.group(2).strip(),
+                        "priority": match.group(3).strip(),
+                        "source": "",
+                    })
 
     return data
 
