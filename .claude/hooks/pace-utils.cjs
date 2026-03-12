@@ -1,0 +1,492 @@
+// pace-utils.js — PACE hooks 公共工具函数
+// 多信号激活判断 + 懒创建模板 + .pace/disabled 豁免 + 任务状态统计
+const fs = require('fs');
+const path = require('path');
+
+const PACE_VERSION = 'v5.0.2';
+const CODE_EXTS = ['.ts', '.js', '.py', '.go', '.rs', '.java', '.tsx', '.jsx', '.vue', '.svelte'];
+const ARTIFACT_FILES = ['spec.md', 'task.md', 'implementation_plan.md', 'walkthrough.md', 'findings.md'];
+const VAULT_PATH = process.env.PACE_VAULT_PATH || '';
+
+// 归档标记常量——所有 hook 必须引用此常量，禁止硬编码字符串
+const ARCHIVE_MARKER = '<!-- ARCHIVE -->';
+const ARCHIVE_PATTERN = /^<!-- ARCHIVE -->$/m;
+
+// T-328: 格式示例常量——供 DENY/Stop/HINT 消息内联引用，确定性最高+零 I/O
+const FORMAT_SNIPPETS = {
+  // task.md 任务条目格式
+  taskEntry: '- [ ] T-NNN 任务标题',
+  taskGroup: '### CHG-YYYYMMDD-NN: 变更标题\n\n<!-- APPROVED -->\n\n- [/] T-001 任务描述\n- [ ] T-002 任务描述',
+  // impl_plan 索引条目格式（hook 检测正则：/^- \\[\\/\\]/m）
+  implIndex: '- [/] CHG-YYYYMMDD-NN 标题 #change [tasks:: T-NNN~T-NNN]',
+  // impl_plan 详情段落格式
+  implDetail: '### CHG-ID 标题\n\n描述变更内容。\n\n**T-NNN 任务标题**：\n- 具体改动说明',
+  // 标记位置
+  approved: '<!-- APPROVED --> 放在 task.md 活跃区的 CHG 分组标题下方、任务列表上方',
+  verified: '<!-- VERIFIED --> 放在 <!-- APPROVED --> 下方，V 阶段验证通过后添加',
+  // checkbox 状态说明
+  statusHelp: '[ ] 未开始 | [/] 进行中 | [x] 完成 | [!] 阻塞 | [-] 跳过',
+  // 变更状态说明（impl_plan 专用，与 statusHelp 是独立术语）
+  changeStatusHelp: '[ ] 规划中 | [/] 进行中 | [x] 完成 | [-] 废弃 | [!] 暂停',
+  // 格式要求（E 阶段 DENY 核心信息）
+  formatRule: 'hook 检测格式为行首 "- [/] "（Markdown checkbox），表格或 emoji 格式无法识别',
+  // 归档操作
+  archiveOp: '用 Edit 将已完成项移到 <!-- ARCHIVE --> 标记下方',
+  // findings/walkthrough 格式（compact 恢复注入用）
+  findingsFormat: '- [状态] 标题 — 结论 #finding [date:: YYYY-MM-DD]，索引+详情(### [日期] 标题)缺一不可',
+  walkthroughFormat: '索引表+详情 ## YYYY-MM-DD CHG-ID 摘要，工作结束必须更新',
+  // impl_plan 详情规则
+  implDetailRule: '每个 [x] 索引必须有 ### CHG-ID 详情段落',
+  // Skill 引用
+  skillRef: '格式参考：paceflow:artifact-management skill',
+};
+
+// W-code-4: 会话级 flag 文件集中管理（session-start 重置用）
+const SESSION_SCOPED_FLAGS = ['degraded', 'todowrite-used', 'archive-reminded', 'findings-reminded', 'impl-archive-reminded', 'cli-refresh-done', 'walkthrough-archive-reminded', 'findings-archive-reminded'];
+
+/** 检测当前进程是否为 Agent Teams teammate（环境变量 CLAUDE_CODE_TEAM_NAME 存在即为 teammate） */
+function isTeammate() {
+  return !!process.env.CLAUDE_CODE_TEAM_NAME;
+}
+
+/**
+ * 获取项目根目录，优先使用 CLAUDE_PROJECT_DIR 环境变量（Claude Code hook 进程自动设置）
+ * fallback 到 process.cwd()（非 hook 环境或环境变量缺失时）
+ * @returns {string} 项目根目录
+ */
+function resolveProjectCwd() {
+  return process.env.CLAUDE_PROJECT_DIR
+    ? path.resolve(process.env.CLAUDE_PROJECT_DIR)
+    : process.cwd();
+}
+
+/** 生成中国时区时间戳字符串 */
+function ts() {
+  return new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+}
+
+/** 从 cwd 提取项目名（小写+连字符格式） */
+function getProjectName(cwd) {
+  // I-1: 空值/极端路径防御
+  if (!cwd || cwd === '.' || cwd === '/' || cwd === '\\') return 'unknown-project';
+  // W-code-3: Windows 盘符根路径守卫（path.basename('C:\\') 返回空字符串）
+  if (/^[A-Z]:\\\\?$/i.test(cwd)) return 'unknown-project';
+  const name = path.basename(cwd).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  return name || 'unknown-project';
+}
+
+// T-281: 模块级缓存，避免同一 hook 进程内重复 existsSync（同 cwd 最多 11 次→1 次）
+let _artifactDirCache = { cwd: null, dir: null };
+
+/**
+ * 获取 artifact 文件的实际存储目录
+ * 优先级：vault 有 artifact → vault | CWD 有 artifact → CWD | 新项目 → vault（默认）| 无 vault → CWD
+ * @param {string} cwd - 当前工作目录
+ * @returns {string} artifact 目录路径
+ */
+function getArtifactDir(cwd) {
+  if (_artifactDirCache.cwd === cwd) return _artifactDirCache.dir;
+  let result = cwd;
+  const vaultDir = path.join(VAULT_PATH, 'projects', getProjectName(cwd));
+  try {
+    // vault 有 artifact → vault（迁移后）
+    if (fs.existsSync(vaultDir) &&
+        ARTIFACT_FILES.some(f => fs.existsSync(path.join(vaultDir, f)))) {
+      result = vaultDir;
+      _artifactDirCache = { cwd, dir: result };
+      return result;
+    }
+  } catch(e) {}
+  // CWD 有 artifact → CWD（未迁移项目，向后兼容）
+  if (ARTIFACT_FILES.some(f => fs.existsSync(path.join(cwd, f)))) {
+    _artifactDirCache = { cwd, dir: cwd };
+    return cwd;
+  }
+  // CWD/.pace/ 有 artifact → .pace/（mycc 等项目的实际存放位置）
+  const paceDir = path.join(cwd, '.pace');
+  if (ARTIFACT_FILES.some(f => fs.existsSync(path.join(paceDir, f)))) {
+    _artifactDirCache = { cwd, dir: paceDir };
+    return paceDir;
+  }
+  // 新项目 → vault（默认目标）
+  result = vaultDir;
+  _artifactDirCache = { cwd, dir: result };
+  return result;
+}
+
+// W-6: 模块级缓存，避免 isPaceProject + 外部调用重复扫描目录
+let _codeCountCache = { cwd: null, count: 0 };
+
+/** 统计 cwd 根目录下的代码文件数量（同 cwd 自动缓存） */
+function countCodeFiles(cwd) {
+  if (_codeCountCache.cwd === cwd) return _codeCountCache.count;
+  try {
+    const count = fs.readdirSync(cwd).filter(f => CODE_EXTS.some(ext => f.endsWith(ext))).length;
+    _codeCountCache = { cwd, count };
+    return count;
+  } catch(e) { return 0; }
+}
+
+/**
+ * 列出 docs/plans/ 中的 Superpowers 计划文件（按日期降序）
+ * @param {string} cwd - 项目根目录
+ * @returns {string[]} 文件名列表（最新在前）
+ */
+function listPlanFiles(cwd) {
+  const plansDir = path.join(cwd, 'docs', 'plans');
+  try {
+    return fs.readdirSync(plansDir)
+      .filter(f => /^\d{4}-\d{2}-\d{2}-.+\.md$/.test(f))
+      .sort()
+      .reverse();
+  } catch(e) { return []; }
+}
+
+/** W-dry-3: 检测 docs/plans/ 是否有 plan 文件（复用 listPlanFiles 消除双重 readdirSync） */
+function hasPlanFiles(cwd) {
+  return listPlanFiles(cwd).length > 0;
+}
+
+/**
+ * 检测是否有未同步到 task.md 的 plan 文件
+ * 通过 .pace/synced-plans 状态文件追踪已桥接的 plan 文件名
+ * @returns {boolean}
+ */
+function hasUnsyncedPlanFiles(cwd) {
+  return listUnsyncedPlanFiles(cwd).length > 0;
+}
+
+/**
+ * 列出未同步到 task.md 的 plan 文件（按日期降序）
+ * @returns {string[]} 未同步的文件名列表
+ */
+function listUnsyncedPlanFiles(cwd) {
+  const plans = listPlanFiles(cwd);
+  if (plans.length === 0) return [];
+  const syncedPath = path.join(cwd, '.pace', 'synced-plans');
+  let synced = [];
+  try { synced = fs.readFileSync(syncedPath, 'utf8').split('\n').filter(Boolean); } catch(e) {}
+  // Superpowers 固定产出主文件 + -design.md 伴随文件，主文件已同步时伴随文件也视为已同步
+  const syncedSet = new Set(synced);
+  for (const f of synced) {
+    syncedSet.add(f.replace(/\.md$/, '-design.md'));
+  }
+  return plans.filter(f => !syncedSet.has(f));
+}
+
+/**
+ * 多信号 PACE 激活判断
+ * @param {string} cwd - 当前工作目录
+ * @returns {'artifact'|'superpowers'|'manual'|'code-count'|false}
+ */
+function isPaceProject(cwd) {
+  try {
+    // T-081: 环境变量优先级最高，支持不同终端不同模式
+    const envFlag = process.env.PACE_ENABLED;
+    if (envFlag === 'false' || envFlag === '0') return false;
+    if (envFlag === 'true' || envFlag === '1') return 'manual';
+    // T-080: 豁免信号（次优先级）— 用户主动禁用 PACE（.pace/disabled）
+    if (fs.existsSync(path.join(cwd, '.pace', 'disabled'))) return false;
+    // 信号 1（最强）：已有任何 PACE artifact 文件（CWD、.pace/ 或 vault）
+    if (ARTIFACT_FILES.some(f => fs.existsSync(path.join(cwd, f)))) return 'artifact';
+    if (ARTIFACT_FILES.some(f => fs.existsSync(path.join(cwd, '.pace', f)))) return 'artifact';
+    const vaultDir = path.join(VAULT_PATH, 'projects', getProjectName(cwd));
+    try {
+      if (fs.existsSync(vaultDir) &&
+          ARTIFACT_FILES.some(f => fs.existsSync(path.join(vaultDir, f)))) return 'artifact';
+    } catch(e) {}
+    // 信号 2（强）：Superpowers plan 文件
+    if (hasPlanFiles(cwd)) return 'superpowers';
+    // 信号 3（强）：手动激活标记
+    if (fs.existsSync(path.join(cwd, '.pace-enabled'))) return 'manual';
+    // 信号 4（弱/兜底）：3+ 代码文件（原有逻辑）
+    if (countCodeFiles(cwd) >= 3) return 'code-count';
+  } catch(e) {}
+  return false;
+}
+
+/** 读取文件活跃区（ARCHIVE_MARKER 上方内容），artifact 文件自动解析 vault 目录 */
+function readActive(cwd, filename) {
+  const dir = ARTIFACT_FILES.includes(filename) ? getArtifactDir(cwd) : cwd;
+  const fp = path.join(dir, filename);
+  // W-code-1: 直接 try readFileSync，消除 TOCTOU 竞态 + 减少 stat syscall
+  try {
+    const content = fs.readFileSync(fp, 'utf8');
+    const m = content.match(ARCHIVE_PATTERN);
+    return m ? content.slice(0, m.index) : content;
+  } catch(e) { return null; }
+}
+
+/** 读取文件全文，artifact 文件自动解析 vault 目录 */
+function readFull(cwd, filename) {
+  const dir = ARTIFACT_FILES.includes(filename) ? getArtifactDir(cwd) : cwd;
+  const fp = path.join(dir, filename);
+  try { return fs.readFileSync(fp, 'utf8'); } catch(e) { return null; }
+}
+
+/** 检查 ARCHIVE 标记格式，返回错误消息或 null */
+function checkArchiveFormat(cwd, filename) {
+  const content = readFull(cwd, filename);
+  if (!content) return null;
+  const hasCorrect = ARCHIVE_PATTERN.test(content);
+  // I-6: 匹配所有级别的错误标题格式（# ARCHIVE ~ ###### ARCHIVE）
+  const hasWrong = /^#{1,6}\s+ARCHIVE/m.test(content);
+  if (hasWrong && !hasCorrect) return `${filename} 使用了错误的 ARCHIVE 标记格式（应为 <!-- ARCHIVE -->）`;
+  return null;
+}
+
+/**
+ * 确保 PACE 项目基础设施就绪（幂等）
+ * - .pace/.gitignore（运行时文件不入库）
+ * - vault 项目目录存在（artifact 存储位置）
+ * @param {string} cwd - 当前工作目录
+ */
+function ensureProjectInfra(cwd) {
+  // .pace/.gitignore
+  try {
+    const paceDir = path.join(cwd, '.pace');
+    const gitignorePath = path.join(paceDir, '.gitignore');
+    if (!fs.existsSync(gitignorePath)) {
+      fs.mkdirSync(paceDir, { recursive: true });
+      fs.writeFileSync(gitignorePath, '*\n', 'utf8');
+    }
+  } catch(e) {}
+  // vault 项目目录
+  try {
+    const vaultDir = path.join(VAULT_PATH, 'projects', getProjectName(cwd));
+    fs.mkdirSync(vaultDir, { recursive: true });
+  } catch(e) {}
+}
+
+/**
+ * T-075: 从模板目录复制缺失的 artifact 文件到 artifact 目录（vault 或 cwd）
+ * @param {string} cwd - 当前工作目录
+ * @returns {string[]} 创建的文件名列表
+ */
+function createTemplates(cwd) {
+  const TEMPLATES_DIR = path.join(__dirname, 'templates');
+  const artDir = getArtifactDir(cwd);
+  // 确保目标目录存在（vault 模式下可能尚未创建）
+  try { fs.mkdirSync(artDir, { recursive: true }); } catch(e) {}
+  const created = [];
+  for (const file of ARTIFACT_FILES) {
+    const target = path.join(artDir, file);
+    const tmpl = path.join(TEMPLATES_DIR, file);
+    if (!fs.existsSync(target) && fs.existsSync(tmpl)) {
+      try {
+        fs.copyFileSync(tmpl, target);
+        created.push(file);
+      } catch(e) {}
+    }
+  }
+  return created;
+}
+
+// I-opt-1: 预编译正则（避免每次调用重新编译）
+const COUNT_RE_PENDING = /- \[[ \/!]\]/g;
+const COUNT_RE_PENDING_TOP = /^- \[[ \/!]\]/gm;
+const COUNT_RE_DONE = /- \[x\]|- \[-\]/g;
+const COUNT_RE_DONE_TOP = /^- \[x\]|^- \[-\]/gm;
+
+/**
+ * W2+O5: 统一任务状态统计（集中管理正则，消除跨文件不一致）
+ * @param {string} text - 待统计的文本（通常是 task.md 活跃区）
+ * @param {object} opts - 选项
+ * @param {boolean} opts.topLevelOnly - true 时仅匹配行首顶层任务（^锚定），false 含子任务
+ * @returns {{pending: number, done: number, total: number}}
+ */
+function countByStatus(text, { topLevelOnly = false } = {}) {
+  const pending = (text.match(topLevelOnly ? COUNT_RE_PENDING_TOP : COUNT_RE_PENDING) || []).length;
+  const done = (text.match(topLevelOnly ? COUNT_RE_DONE_TOP : COUNT_RE_DONE) || []).length;
+  return { pending, done, total: pending + done };
+}
+
+/**
+ * 检查 impl_plan 全文中所有 [x] 索引是否有对应 ### CHG-ID 详情段落
+ * @param {string} planFull - implementation_plan.md 全文
+ * @returns {string[]} 缺少详情的 CHG/HOTFIX-ID 列表
+ */
+function findMissingImplDetails(planFull) {
+  if (!planFull) return [];
+  const doneIndex = planFull.match(/^- \[x\] ((?:CHG|HOTFIX)-\d{8}-\d{2})/gm) || [];
+  if (doneIndex.length === 0) return [];
+  return doneIndex
+    .map(m => m.match(/((?:CHG|HOTFIX)-\d{8}-\d{2})/)[0])
+    .filter(id => {
+      const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return !new RegExp(`^### ${escaped}`, 'm').test(planFull);
+    });
+}
+
+/**
+ * 检查 findings.md 全文中 [ ] 索引是否有对应 ### 详情段落
+ * 匹配规则：索引标题前 8 字在详情 ### 行中子串匹配
+ * @param {string} findingsFull - findings.md 全文
+ * @returns {string[]} 缺少详情的标题列表
+ */
+function findMissingFindingsDetails(findingsFull) {
+  if (!findingsFull) return [];
+  const unresolved = findingsFull.match(/^- \[ \] ([^—\n]+)/gm) || [];
+  if (unresolved.length === 0) return [];
+  const detailHeaders = (findingsFull.match(/^### .+$/gm) || [])
+    .map(h => h.replace(/^### (\[\d{4}-\d{2}-\d{2}\] )?/, ''));
+  const missing = [];
+  for (const line of unresolved) {
+    const title = line.replace(/^- \[ \] /, '').trim();
+    const key = title.length > 8 ? title.slice(0, 8) : title;
+    if (!detailHeaders.some(dt => dt.includes(key))) {
+      missing.push(title);
+    }
+  }
+  return missing;
+}
+
+/**
+ * 读取 AI 记录的 native plan 文件路径
+ * @param {string} cwd - 项目根目录
+ * @returns {string|null} plan 文件路径或 null
+ */
+function getNativePlanPath(cwd) {
+  const fp = path.join(cwd, '.pace', 'current-native-plan');
+  try { return fs.readFileSync(fp, 'utf8').trim() || null; } catch(e) { return null; }
+}
+
+/**
+ * 扫描 thoughts/ 和 knowledge/ 中与指定项目相关的笔记
+ * 解析 frontmatter 的 projects/summary/status 字段，返回 L0 摘要
+ * @param {string} projectName - 当前项目名（小写连字符格式，或由 getProjectName 生成）
+ * @returns {Array<{title: string, summary: string, status: string}>}
+ */
+function scanRelatedNotes(projectName) {
+  const results = [];
+  for (const dir of ['thoughts', 'knowledge']) {
+    const dirPath = path.join(VAULT_PATH, dir);
+    try {
+      if (!fs.existsSync(dirPath)) continue;
+      const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.md'));
+      for (const file of files) {
+        try {
+          const content = fs.readFileSync(path.join(dirPath, file), 'utf8');
+          // I-7: 处理 BOM（UTF-8 BOM \uFEFF 可能出现在文件开头）
+          const fmMatch = content.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/);
+          if (!fmMatch) continue;
+          const fm = fmMatch[1];
+          // 解析 projects 字段
+          const projMatch = fm.match(/^projects:\s*\[([^\]]*)\]/m);
+          if (!projMatch) continue;
+          const projects = projMatch[1].split(',').map(p => p.trim().toLowerCase());
+          if (!projects.includes(projectName.toLowerCase())) continue;
+          // 解析 status（archived 不注入）
+          const statusMatch = fm.match(/^status:\s*(.+)/m);
+          const status = statusMatch ? statusMatch[1].trim() : 'unknown';
+          if (status === 'archived') continue;
+          // 解析 summary
+          const summaryMatch = fm.match(/^summary:\s*(?:"([^"]*)"|'([^']*)'|(.+))/m);
+          const summary = summaryMatch ? (summaryMatch[1] || summaryMatch[2] || summaryMatch[3] || '').trim() : '';
+          results.push({ title: file.replace(/\.md$/, ''), summary, status });
+        } catch(e) { /* 单文件解析失败静默跳过 */ }
+      }
+    } catch(e) { /* 目录不可读静默跳过 */ }
+  }
+  return results;
+}
+
+const MAX_LOG_SIZE = 512 * 1024;
+/**
+ * 创建带日志轮转的 logger 函数（512KB 上限，超过截断保留后半）
+ * @param {string} logPath - 日志文件路径
+ * @returns {function(string): void}
+ */
+function createLogger(logPath) {
+  return (msg) => {
+    try {
+      try {
+        const stat = fs.statSync(logPath);
+        if (stat.size > MAX_LOG_SIZE) {
+          // W-code-2: 使用 Buffer 直接操作字节，避免字节/字符混淆
+          const buf = fs.readFileSync(logPath);
+          // W-1: 截断后对齐到换行符，防止 UTF-8 多字节字符被截断
+          const half = buf.slice(buf.length >> 1);
+          const nlIdx = half.indexOf(10); // 0x0A = \n
+          fs.writeFileSync(logPath, nlIdx >= 0 ? half.slice(nlIdx + 1) : half);
+        }
+      } catch(e) {}
+      fs.appendFileSync(logPath, msg);
+    } catch(e) {}
+  };
+}
+
+/**
+ * W-dry-2: 格式化 Superpowers 桥接提示（消除 4 处重复的 listPlanFiles + fileList 格式化）
+ * @param {string} cwd - 项目根目录
+ * @param {string} artDir - artifact 目录
+ * @returns {{ fileList: string, bridgeSteps: string } | null} null 表示无计划文件
+ */
+function formatBridgeHint(cwd, artDir) {
+  // 仅显示未同步的 plan 文件（已同步的不再提示桥接）
+  const planFiles = listUnsyncedPlanFiles(cwd);
+  if (planFiles.length === 0) return null;
+  const fileList = planFiles.slice(0, 3).map(f => `docs/plans/${f}`).join(', ');
+  const artPath = (artDir || cwd).replace(/\\/g, '/');
+  const bridgeSteps = `Read plan → Edit ${artPath}/task.md 添加任务 + APPROVED → Edit ${artPath}/implementation_plan.md 添加 CHG 索引。详见 /pace-bridge skill。`;
+  return { fileList, bridgeSteps };
+}
+
+/**
+ * 从 findings 活跃区提取开放项（[ ]）的前 8 字 key，用于详情段落匹配
+ * @param {string} text - findings.md 活跃区文本
+ * @returns {string[]} key 数组，每个为索引标题前 8 字（去空格）
+ */
+function extractOpenKeys(text) {
+  const keys = [];
+  (text.match(/^- \[ \] ([^—\n]+)/gm) || []).forEach(line => {
+    keys.push(line.replace(/^- \[ \] /, '').trim().slice(0, 8));
+  });
+  return keys;
+}
+
+// S-1: 统一 stdin 解析 — 替换 6 个 hook 的重复 JSON.parse 模板
+/**
+ * 解析 hook stdin 原始输入，返回统一结构（内部 try-catch，永不抛异常）
+ * @param {string} rawInput - stdin 原始文本
+ * @returns {{ ok: boolean, toolName: string, filePath: string, oldString: string, newString: string, content: string, toolInput: object, type: string, lastMessage: string, raw: object }}
+ */
+function parseHookStdin(rawInput) {
+  let parsed = {};
+  let ok = false;
+  try { parsed = JSON.parse(rawInput); ok = true; } catch(e) {}
+  return {
+    ok,
+    toolName: parsed.tool_name || '',
+    filePath: (parsed.tool_input?.file_path || '').replace(/\\/g, '/'),
+    oldString: parsed.tool_input?.old_string || '',
+    newString: parsed.tool_input?.new_string || '',
+    content: parsed.tool_input?.content || '',
+    toolInput: parsed.tool_input || {},
+    type: parsed.type || '',
+    lastMessage: parsed.last_assistant_message || '',
+    raw: parsed
+  };
+}
+
+/**
+ * 异步 stdin 解析 wrapper — 替代 4 个 hook 的 3 行流模板
+ * @param {function} callback - (stdin, rawInput) => void
+ */
+function withStdinParsed(callback) {
+  let input = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (chunk) => { input += chunk; });
+  process.stdin.on('end', () => { callback(parseHookStdin(input), input); });
+}
+
+/**
+ * 同步 stdin 解析 — 替代 session-start/stop 的 readFileSync(0) 模板
+ * @returns {{ ok: boolean, toolName: string, filePath: string, oldString: string, newString: string, content: string, toolInput: object, type: string, lastMessage: string, raw: object }}
+ */
+function parseStdinSync() {
+  try { return parseHookStdin(fs.readFileSync(0, 'utf8')); }
+  catch(e) { return parseHookStdin(''); }
+}
+
+module.exports = { PACE_VERSION, CODE_EXTS, ARTIFACT_FILES, VAULT_PATH, ARCHIVE_MARKER, ARCHIVE_PATTERN, SESSION_SCOPED_FLAGS, FORMAT_SNIPPETS, resolveProjectCwd, ts, countCodeFiles, hasPlanFiles, listPlanFiles, hasUnsyncedPlanFiles, listUnsyncedPlanFiles, isPaceProject, isTeammate, getProjectName, getArtifactDir, readActive, readFull, checkArchiveFormat, ensureProjectInfra, createTemplates, countByStatus, scanRelatedNotes, createLogger, formatBridgeHint, findMissingImplDetails, findMissingFindingsDetails, getNativePlanPath, extractOpenKeys, parseHookStdin, withStdinParsed, parseStdinSync };

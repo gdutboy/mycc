@@ -22,6 +22,11 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+# Windows 下强制 stdout 使用 UTF-8，避免 GBK 编码错误
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 # 微信客户端 User-Agent
 WECHAT_UA = "Mozilla/5.0 (Linux; Android 13; V2148A) AppleWebKit/537.36 Chrome/116.0.0.0 Mobile Safari/537.36 MicroMessenger/8.0.49.2600 WeChat/arm64 Weixin NetType/WIFI Language/zh_CN"
@@ -34,10 +39,9 @@ def fetch_wechat_article(url: str) -> dict:
     result_proc = subprocess.run(
         ["curl", "-s", "-L", "-A", WECHAT_UA, url],
         capture_output=True,
-        text=True,
         timeout=30,
     )
-    content = result_proc.stdout
+    content = result_proc.stdout.decode("utf-8", errors="replace")
 
     result = {
         "url": url,
