@@ -12,6 +12,11 @@ Example:
 
 import fnmatch
 import sys
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import zipfile
 from pathlib import Path
 from scripts.quick_validate import validate_skill

@@ -4,10 +4,15 @@ cc 能力看板可视化
 中国风 + Mac 风格
 """
 
+import sys
 import re
 import os
 import webbrowser
 import tempfile
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 from html import escape
 from pathlib import Path
 from datetime import datetime

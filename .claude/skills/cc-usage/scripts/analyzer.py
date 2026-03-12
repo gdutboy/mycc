@@ -17,6 +17,11 @@ Claude Code Token Usage Analyzer
 import json
 import os
 import sys
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import glob
 import argparse
 from collections import defaultdict

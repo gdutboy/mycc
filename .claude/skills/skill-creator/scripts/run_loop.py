@@ -10,6 +10,11 @@ import argparse
 import json
 import random
 import sys
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import tempfile
 import time
 import webbrowser
