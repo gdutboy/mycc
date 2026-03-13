@@ -1,6 +1,6 @@
 ---
 name: nextjs
-description: Next.js App Router 开发最佳实践指南
+description: Use when 正在开发 Next.js App Router 项目，需要参考服务端组件、客户端组件、路由参数、cookies 或数据获取最佳实践时触发；不用于非 Next.js 项目、纯 UI 文案修改或只解释框架概念的场景
 layer: 执行层
 authorization: A区（自动执行，无需人类介入）
 output_levels: L1（结论）

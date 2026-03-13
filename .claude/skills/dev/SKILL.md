@@ -1,6 +1,6 @@
 ---
 name: dev
-description: TDD 开发流程：测试先行，人工卡点审核
+description: Use when 用户明确要修改代码、实现功能、补测试或修复已确认的问题时触发；不用于纯解释代码、纯方案讨论或只做原因分析的场景
 layer: 执行层
 authorization: B区（生成候选，通知人审核）
 output_levels: L2（能力）

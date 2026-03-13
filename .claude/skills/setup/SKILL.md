@@ -1,6 +1,6 @@
 ---
 name: setup
-description: 交互式引导完成 MyCC 初始化配置
+description: Use when 用户首次配置 mycc、补齐初始化信息、修复模板占位符或需要重置初始化配置时触发；不用于日常启动服务、普通功能使用或解释 mycc 能力的场景
 ---
 
 # MyCC 初始化引导

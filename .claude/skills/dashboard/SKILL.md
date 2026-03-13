@@ -1,6 +1,6 @@
 ---
 name: dashboard
-description: 可视化查看 cc 技能能力看板
+description: Use when 用户要打开或查看 cc 能力看板、skill 列表汇总或平台状态总览时触发；不用于解释某个 skill 的规则、触发词或流程
 ---
 
 # cc 能力看板可视化

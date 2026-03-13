@@ -1,6 +1,6 @@
 ---
 name: dev-team
-description: 多 Agent 团队协作开发，支持标准与快速两种模式
+description: Use when 开发任务可拆成多个相对独立的子任务，需要多个 Agent 并行推进时触发；适用于前后端并行、模块并行或长链路复杂开发，不用于普通单人开发
 layer: 执行层
 authorization: B区（生成候选，通知人审核）
 output_levels: L2（能力）

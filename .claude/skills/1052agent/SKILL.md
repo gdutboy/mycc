@@ -1,6 +1,6 @@
 ---
 name: 1052agent
-description: 动态双主多智能体协同架构
+description: Use when 任务需要动态拆成多个角色协作、持续追踪状态并通过多智能体并行推进时触发；适用于复杂长时任务，不用于简单问答、普通单 Agent 开发或短链路一次性操作
 layer: 执行层
 authorization: B区（生成候选，通知人审核）
 output_levels: L2（能力）

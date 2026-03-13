@@ -1,0 +1,43 @@
+MIT License
+
+Copyright (c) 2024 WeChat-MCP-Server
+
+IMPORTANT DISCLAIMER:
+This software involves WeChat automation and carries significant risks. 
+Use at your own risk and responsibility. The developers disclaim all liability.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+ENHANCED DISCLAIMER:
+The authors, contributors, and distributors of this software are not liable for any:
+- Account suspensions, bans, or restrictions
+- Data loss or corruption
+- Privacy breaches or security incidents
+- Legal consequences or regulatory violations
+- Commercial losses or business interruptions
+- WeChat platform policy violations
+- Automated behavior detection or penalties
+- Third-party service disruptions
+- Technical failures or system incompatibilities
+- Any direct, indirect, incidental, special, or consequential damages
+
+COMMERCIAL USE WARNING:
+This MIT license legally permits commercial use, however:
+- Commercial use of WeChat automation tools carries significant risks
+- Users must assess legal risks before commercial deployment
+- Ensure compliance with local laws and regulations
+- Respect WeChat's terms of service and commercial policies
+- Consult legal professionals for commercial applications
+- Accept full responsibility for all commercial use risks
+- The software is provided "AS IS" without warranty for commercial purposes
+
+BY USING THIS SOFTWARE, YOU ACKNOWLEDGE THAT YOU HAVE READ, UNDERSTOOD, AND 
+AGREE TO ASSUME ALL RISKS AND RESPONSIBILITIES ASSOCIATED WITH ITS USE.

@@ -1,6 +1,6 @@
 ---
 name: gh-trending
-description: 采集 GitHub Trending AI 项目，分析后推飞书
+description: Use when 用户明确要采集 GitHub Trending 上的 AI 项目并推送结果到飞书时触发，如今日 GitHub、Trending AI 推送；不用于普通 GitHub 查询、单仓库分析或仅讨论开源趋势的场景
 layer: 执行层
 authorization: A区（自动执行，无需人类介入）
 output_levels: L1（结论）

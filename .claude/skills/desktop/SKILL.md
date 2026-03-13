@@ -1,6 +1,6 @@
 ---
 name: desktop
-description: 让 CC 看屏幕、控鼠标键盘操作 Windows 桌面
+description: Use when 用户明确要在 Windows 桌面上执行可见操作时触发，如截图、点击、输入、切换窗口、读取界面信息；不用于纯代码分析、非桌面任务或只解释自动化能力的场景
 layer: 基础层
 authorization: B区（执行后通知）
 output_levels: L1

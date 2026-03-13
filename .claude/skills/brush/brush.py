@@ -18,6 +18,7 @@ import os
 import sys
 import argparse
 import subprocess
+from pathlib import Path
 
 # 颜色
 GREEN = '\033[92m'
@@ -134,6 +135,32 @@ def format_output(description, style, size, prompts):
     return output
 
 
+def send_image_to_feishu(title, image_url, color='blue'):
+    """调用 tell-me/send.js 发送图片 URL 到飞书"""
+    script_path = Path(__file__).resolve().parents[1] / 'tell-me' / 'send.js'
+
+    if not script_path.exists():
+        print(f"{RED}未找到 send.js：{script_path}{RESET}")
+        return False
+
+    cmd = [
+        'node',
+        str(script_path),
+        '--image-url',
+        title,
+        image_url,
+        color,
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        print(f"{GREEN}✅ 已推送到飞书{RESET}")
+        return True
+
+    print(f"{RED}❌ 飞书推送失败：{(result.stderr or result.stdout).strip()}{RESET}")
+    return False
+
+
 def try_generate_image(prompt, api_key=None):
     """尝试调用 API 生成图片（如果配置了）"""
     # 这里可以集成各种 AI 绘图 API
@@ -172,9 +199,20 @@ def main():
     parser.add_argument('--size', '-z', metavar='SIZE', default='16:9',
                         help='尺寸：16:9, 4:3, 1:1, 9:16')
     parser.add_argument('--api-key', '-k', metavar='KEY', help='OpenAI API Key（可选）')
+    parser.add_argument('--image-url', metavar='URL', help='已有图片 URL（无需 API 生成）')
+    parser.add_argument('--send-feishu', action='store_true', help='生成成功后自动推送到飞书')
+    parser.add_argument('--title', metavar='TITLE', default='AI 生成图片', help='飞书卡片标题')
+    parser.add_argument('--color', metavar='COLOR', default='blue', help='飞书卡片颜色（blue/green/orange/red）')
     parser.add_argument('--interactive', '-i', action='store_true', help='交互模式')
 
     args = parser.parse_args()
+
+    # 直接使用已有图片 URL（无需 API key）
+    if args.image_url:
+        print(f"{GREEN}【图片链接】{RESET}\n{args.image_url}\n")
+        if args.send_feishu:
+            send_image_to_feishu(args.title, args.image_url, args.color)
+        return
 
     # 读取描述
     if args.description:
@@ -196,8 +234,19 @@ def main():
     # 生成变体
     variants = generate_prompt_variants(description, args.style)
 
-    # 输出
+    # 输出提示词
     print(format_output(description, args.style, args.size, [( '主提示词', main_prompt)] + variants))
+
+    # 尝试生成图片
+    image_url = try_generate_image(main_prompt, args.api_key)
+    if image_url:
+        print(f"{GREEN}【生成图片链接】{RESET}\n{image_url}\n")
+
+        if args.send_feishu:
+            send_image_to_feishu(args.title, image_url, args.color)
+    else:
+        if args.send_feishu:
+            print(f"{YELLOW}未生成图片：请传入可用 --api-key 后再开启 --send-feishu{RESET}")
 
 
 if __name__ == '__main__':

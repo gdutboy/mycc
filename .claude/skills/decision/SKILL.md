@@ -1,6 +1,6 @@
 ---
 name: decision
-description: 从对话上下文提取决策，生成结构化记录
+description: Use when 刚完成技术选型、架构判断、方案取舍或明确选 A 不选 B 的决策时触发；不用于仍在发散讨论、尚未形成结论的场景
 layer: 基础层
 authorization: A区（自动执行，不等人确认）
 output_levels: L1（结论）

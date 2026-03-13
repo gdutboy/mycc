@@ -1,6 +1,6 @@
 ---
 name: cc-usage
-description: 查看 Claude Code token 用量统计
+description: Use when 用户要查看 Claude Code 本月 token 用量、费用统计或消费趋势时触发，如看看用量、token 消耗、花了多少；不用于一般日志分析、项目成本核算或解释计费机制的场景
 layer: 基础层
 authorization: A区（自动执行，无需人类介入）
 output_levels: L1（结论）

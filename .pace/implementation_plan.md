@@ -1,6 +1,6 @@
 # 实施计划
 
-> **最后更新**: 2026-03-10T15:44:00+08:00
+> **最后更新**: 2026-03-12T20:35:00+08:00
 
 ---
 
@@ -8,6 +8,9 @@
 
 <!-- 格式：- [状态] CHG-ID 标题 #change [tasks:: T-NNN~T-NNN] -->
 
+- [/] CHG-20260313-01 desktop runtime 实施 #change [tasks:: T-412~T-420]
+- [x] CHG-20260312-01 desktop 运行时设计规格审查修订 #change [tasks:: T-408~T-411]
+- [/] CHG-20260311-01 测试 Superpowers 桥接功能 #change [tasks:: T-404~T-407]
 - [x] CHG-20260310-02 ticket18 可操作发现修复 — DRY 重构 + 常量化 + 纠偏协议 + Flag 文档 + install 测试 #change [tasks:: T-397~T-403]
 - [x] HOTFIX-20260310-01 config-guard.js S-1 重构遗漏变量名修复 #change [tasks:: T-396]
 - [x] CHG-20260309-06 S-3 版本自动化脚本 #change [tasks:: T-394~T-395]
@@ -19,6 +22,82 @@
 ## 活跃变更详情
 
 <!-- 每个变更索引必须有对应的详情段落 -->
+
+### CHG-20260313-01 desktop runtime 实施
+
+基于已批准的 desktop runtime spec 与已写好的 implementation plan，开始把当前单文件 `desktop.py` 演进为 Hybrid-first primitive runtime，并按计划分阶段完成测试骨架、backend/router/executor、CLI 兼容层和微信脚本迁移。
+
+**T-412 建立 desktop runtime 测试骨架**：
+- 新增 `requirements-dev.txt` 与 `.claude/skills/desktop/tests/` 基础测试文件
+- 先锁定 result/region/safety 的最小公共契约
+
+**T-413 固化 adapters 边界，抽离旧底层能力**：
+- 将截图、输入、窗口操作从 `desktop.py` 拆到 `adapters/`
+- 为 CLI 建立可 monkeypatch 的 runtime 入口函数
+
+**T-414 落地 OCR / UIA / template backend 最小实现**：
+- 抽出 OCR backend
+- 建立最小可用 UIA backend 与 template 占位 backend
+
+**T-415 实现 router 的 find/read/wait 动作分流**：
+- 按 spec 固化 OCR/UIA fallback、歧义判定、wait_mode 语义
+- 统一 debug 字段与失败上下文
+
+**T-416 实现 executor 的 11 个 primitive 与 safety 校验**：
+- 在 `core/executor.py` 暴露统一 primitive API
+- 接入 `region`、`safety`、`assert`、`wait_*` 契约
+
+**T-417 切换 desktop CLI 到 runtime 薄封装**：
+- 保持旧参数入口兼容
+- 内部统一转调 runtime executor
+
+**T-418 迁移微信读取/发送/监控脚本到 runtime**：
+- `wechat-read.py`、`wechat-send.py`、`wechat-monitor.py`、`wechat-autochat.py` 改为复用 runtime
+- 逐步去掉脚本内直连底层桌面库的逻辑
+
+**T-419 更新 desktop 文档与兼容映射**：
+- 更新 `SKILL.md` 与 `REFERENCE.md`
+- 补充 primitive/runtime 视角说明、兼容映射和 debug/safety 说明
+
+**T-420 执行测试与 smoke 验证**：
+- 运行单元测试、mock 半集成测试与关键 CLI/脚本 smoke case
+- 为后续 Verify 阶段准备验证依据
+
+### CHG-20260312-01 desktop 运行时设计规格审查修订
+
+将已批准的 desktop runtime 设计文档从“方向性设计”继续收敛为“可直接实施的规格”，补齐可执行阈值、等待/断言语义、验收标准与兼容迁移说明，然后进入下一轮规格审查。
+
+**T-408 补齐路由阈值与 assert/wait 语义**：
+- 明确 `find` 的不稳定命中判定阈值与 fallback 条件
+- 明确 `assert` 的一次性观测语义与 `wait_*` 的轮询语义边界
+
+**T-409 补齐验收指标与兼容迁移计划**：
+- 为第一阶段补充可验证的成功标准、flaky 判定与性能边界
+- 说明旧 CLI / 微信脚本如何逐步迁移到新 primitive runtime
+
+**T-410 发起第二轮规格审查并收敛问题**：
+- 在补齐缺口后重新进行 spec review
+- 根据 review 结果继续修订直到可接受
+
+**T-411 通知用户审阅规格文件**：
+- 在规格审查通过后，请用户 review `docs/superpowers/specs/2026-03-12-desktop-runtime-design.md`
+- 用户确认后再切换到 `superpowers:writing-plans`
+
+### CHG-20260311-01 测试 Superpowers 桥接功能
+
+验证 PACEflow 的 Superpowers 桥接功能是否正常工作。
+
+**T-404 创建测试计划文件**：
+- 在 docs/plans/ 目录创建测试计划文件
+
+**T-405 验证 Hooks 检测到计划文件**：
+- 切换到严格模式，观察 Hooks 响应
+
+**T-406 执行 pace-bridge 桥接**：
+- 调用 pace-bridge skill 进行桥接
+
+**T-407 检查 task.md 是否正确生成任务**：
+- 验证任务列表是否正确转换
 
 <!-- ARCHIVE -->
 

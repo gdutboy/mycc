@@ -1,6 +1,6 @@
 ---
 name: draft
-description: 根据大纲生成文章初稿
+description: Use when 用户已经有主题或大纲，需要生成文章、公众号或长文初稿时触发，如写初稿、起草正文、扩成完整文章；不用于只列提纲、只做润色或只生成标题的场景
 layer: 领域层
 authorization: A区（自动执行）
 output_levels: L2（带内容）

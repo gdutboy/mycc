@@ -1,6 +1,6 @@
 ---
 name: evolve
-description: 扫描 GitHub Trending，gap 分析 skill，推送升级建议
+description: Use when 用户要对比 GitHub Trending 最新项目与 mycc 现有 skill 体系的差距，并产出升级建议、能力缺口或进化方向时触发；不用于普通趋势播报、单次采集或只解释某个 skill 的场景
 ---
 
 # cc 自进化巡检

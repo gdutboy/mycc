@@ -1,0 +1,79 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node '${CLAUDE_PLUGIN_ROOT}/hooks/session-start.cjs'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node '${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use.cjs'"
+          }
+        ]
+      },
+      {
+        "matcher": "TodoWrite|TaskCreate|TaskUpdate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node '${CLAUDE_PLUGIN_ROOT}/hooks/todowrite-sync.cjs'"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node '${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-use.cjs'"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node '${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.cjs'"
+          }
+        ]
+      }
+    ],
+    "ConfigChange": [
+      {
+        "matcher": "project_settings|local_settings",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node '${CLAUDE_PLUGIN_ROOT}/hooks/config-guard.cjs'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node '${CLAUDE_PLUGIN_ROOT}/hooks/stop.cjs'"
+          }
+        ]
+      }
+    ]
+  }
+}

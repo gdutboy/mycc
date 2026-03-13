@@ -1,6 +1,6 @@
 ---
 name: create-system
-description: 创作任务路由，自动分发到对应创作技能
+description: Use when 用户明确要产出创作内容时触发，如写文章、列大纲、起标题、生成初稿、润色或转公众号格式；不用于只讨论写作方法、内容策略或创作流程说明的场景
 layer: 路由层
 authorization: A区（自动执行）
 output_levels: L1（结论）

@@ -1,6 +1,6 @@
 ---
 name: startup-259
-description: 用 2-5-9 框架验证创业假设，设计低成本验证方案
+description: Use when 用户有创业点子、项目方向或商业机会，需要快速验证可行性、筛选优先级或判断是否值得继续投入时触发；不用于直接做商业计划书、增长执行或技术落地的场景
 layer: 分析层
 authorization: A区（自动执行，无需人类介入）
 output_levels: L1（结论）, L4（深度分析）

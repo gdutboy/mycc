@@ -1,6 +1,6 @@
 ---
 name: test-review
-description: 审核测试用例质量，自动或手动触发
+description: Use when 用户要审核测试用例的覆盖率、结构质量、缺口或是否漏测关键路径时触发；不用于直接编写测试、执行测试命令或只修复单个 failing test 的场景
 layer: 执行层
 authorization: A区（自动执行，无需人类介入）
 output_levels: L1（结论）, L4（深度分析）

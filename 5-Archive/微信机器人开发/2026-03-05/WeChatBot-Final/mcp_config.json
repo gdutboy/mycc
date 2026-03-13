@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "wechat": {
+      "command": "python",
+      "args": ["src/mcp_server.py"],
+      "env": {},
+      "cwd": "",
+      "description": "WeChat messaging server for sending text messages through WeChat automation"
+    }
+  },
+  "serverInfo": {
+    "name": "wechat-mcp-server",
+    "version": "1.0.0",
+    "description": "A Model Context Protocol server for WeChat messaging automation",
+    "author": "WeChat MCP Team",
+    "license": "MIT"
+  }
+}

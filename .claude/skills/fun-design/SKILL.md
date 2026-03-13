@@ -1,6 +1,6 @@
 ---
 name: fun-design
-description: 用极简设计法审视产品需求，做功能瘦身
+description: Use when 产品、功能或流程显得臃肿复杂，需要做功能减法、压缩交互步骤或重新聚焦核心价值时触发；不用于完整产品设计、视觉设计执行或直接写代码实现的场景
 layer: 分析层
 authorization: B区（生成候选，通知人审核）
 output_levels: L1（结论）

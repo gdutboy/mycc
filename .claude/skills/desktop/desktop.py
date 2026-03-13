@@ -12,8 +12,10 @@ import time
 import io
 import asyncio
 
+from adapters import input as input_adapter, screen as screen_adapter, windows as windows_adapter
+
+
 # 修复 Windows 中文输出
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 # 尝试导入依赖，失败时给出友好提示
 try:
@@ -34,9 +36,14 @@ except ImportError:
     sys.exit(1)
 
 
+def configure_stdout():
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+
 def get_screen_size():
     """获取屏幕尺寸"""
-    return pyautogui.size()
+    return screen_adapter.get_screen_size()
 
 
 def screenshot(filename=None, region=None):
@@ -50,34 +57,7 @@ def screenshot(filename=None, region=None):
     Returns:
         PIL Image 对象
     """
-    # 优先使用 mss（更可靠，能捕获完整屏幕）
-    try:
-        import mss
-        s = mss.mss()
-
-        if region:
-            # 区域截图
-            monitor = {"left": region[0], "top": region[1], "width": region[2], "height": region[3]}
-        else:
-            # 全屏截图，使用 monitor 0（所有显示器合并）
-            monitor = s.monitors[0]
-
-        img_raw = s.grab(monitor)
-        # mss 返回的是 BGRA，需要转换为 RGB
-        img = Image.frombytes("RGB", img_raw.size, img_raw.bgra, "raw", "BGRX")
-    except Exception as e:
-        # 回退到 pyautogui
-        print(f"mss 截图失败，使用 pyautogui: {e}")
-        if region:
-            img = pyautogui.screenshot(region=region)
-        else:
-            img = pyautogui.screenshot()
-
-    if filename:
-        img.save(filename)
-        print(f"截图已保存: {filename}")
-
-    return img
+    return screen_adapter.capture_screen(region=region, save_path=filename)
 
 
 async def ocr_image(img, bbox=None, fast=False):
@@ -170,12 +150,7 @@ def click(x=None, y=None, button='left', double=False):
         button: left, right, middle
         double: 是否双击
     """
-    if x is not None and y is not None:
-        pyautogui.click(x, y, clicks=2 if double else 1, button=button)
-        return f"点击 ({x}, {y})"
-    else:
-        pyautogui.click(clicks=2 if double else 1, button=button)
-        return f"点击当前位置"
+    return input_adapter.click(x=x, y=y, button=button, double=double)
 
 
 def right_click(x=None, y=None):
@@ -213,28 +188,7 @@ def press_key(key):
     Args:
         key: enter, tab, escape, ctrl, alt, shift, win, 等
     """
-    # 映射按键名称
-    key_map = {
-        'enter': 'enter',
-        'return': 'enter',
-        'tab': 'tab',
-        'escape': 'esc',
-        'esc': 'esc',
-        'ctrl': 'ctrl',
-        'alt': 'alt',
-        'shift': 'shift',
-        'win': 'win',
-        'up': 'up',
-        'down': 'down',
-        'left': 'left',
-        'right': 'right',
-        'delete': 'delete',
-        'backspace': 'backspace',
-    }
-
-    key = key_map.get(key.lower(), key)
-    pyautogui.press(key)
-    return f"按下: {key}"
+    return input_adapter.press_key(key)
 
 
 def hotkey(*keys):
@@ -245,62 +199,22 @@ def hotkey(*keys):
         hotkey('ctrl', 'v')  # 粘贴
         hotkey('alt', 'f4')  # 关闭窗口
     """
-    pyautogui.hotkey(*keys)
-    return f"按下组合键: {'+'.join(keys)}"
+    return input_adapter.hotkey(*keys)
 
 
 def list_windows():
     """列出所有窗口"""
-    try:
-        windows = gw.getAllWindows()
-        result = []
-        for w in windows:
-            if w.title:
-                result.append({
-                    "title": w.title,
-                    "position": list(w.box),
-                    "active": w.isActive
-                })
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+    return windows_adapter.list_windows()
 
 
 def get_active_window():
     """获取当前活动窗口"""
-    try:
-        w = gw.getActiveWindow()
-        if w:
-            return json.dumps({
-                "title": w.title,
-                "position": list(w.box),
-                "size": [w.width, w.height]
-            }, ensure_ascii=False, indent=2)
-        return "{}"
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+    return windows_adapter.get_active_window()
 
 
 def activate_window(title):
     """激活指定窗口（模糊匹配，支持最小化窗口恢复）"""
-    import ctypes
-    user32 = ctypes.windll.user32
-
-    try:
-        windows = gw.getAllWindows()
-        for w in windows:
-            if title.lower() in w.title.lower():
-                hwnd = w._hWnd
-                # SW_RESTORE = 9，恢复最小化窗口
-                user32.ShowWindow(hwnd, 9)
-                time.sleep(0.3)
-                # SetForegroundWindow 激活到前台
-                user32.SetForegroundWindow(hwnd)
-                time.sleep(0.3)
-                return f"已激活窗口: {w.title}"
-        return f"未找到窗口: {title}"
-    except Exception as e:
-        return f"错误: {e}"
+    return windows_adapter.activate_window(title)
 
 
 async def cursor_ocr(size=(300, 200)):
@@ -523,6 +437,7 @@ def main():
     args = parser.parse_args()
 
     # 设置 pyautogui 安全
+    configure_stdout()
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE = 0.1
 

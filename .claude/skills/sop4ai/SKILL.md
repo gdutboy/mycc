@@ -1,6 +1,6 @@
 ---
 name: sop4ai
-description: 编写 AI 可执行的 SOP 操作流程文档
+description: Use when 用户要把一套重复执行的流程沉淀成 AI 可执行的 SOP、操作规范或标准步骤文档时触发；不用于普通说明文、项目方案讨论或只解释某个流程怎么做的场景
 layer: 执行层
 authorization: B区（生成候选，通知人审核）
 output_levels: L2（能力）

@@ -1,6 +1,6 @@
 ---
 name: mycc
-description: 启动 mycc 小程序后端服务（后台运行）
+description: Use when 用户要启动、重启或排查 mycc 手机端远程访问服务时触发，如启动远程访问、查看连接信息、处理连不上问题；不用于首次初始化配置、普通代码开发或只解释 mycc 是什么的场景
 ---
 
 # mycc

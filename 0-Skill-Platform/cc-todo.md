@@ -9,7 +9,7 @@
 
 | ID | 任务名 | 状态 | ready 条件 | 备注 |
 |----|--------|------|-----------|------|
-| c1 | 每周复盘 | pending | 每周日 | 回顾本周 context.md，归档到 5-Archive/周记/ |
+| c1 | 每周复盘 | done | 每周日 | 已归档到 5-Archive/周记/2026-03-09~03-11.md |
 | c2 | status 快照 | done | 每日 | 已更新 status.md 并追加到 context.md |
 | c3 | 归档 stockquant 历史文档 | done | 随时 | 已归档到 5-Archive/stockquant-历史文档/ |
 | c4 | 调整 1052-agent 巡检频率 | done | 随时 | f1 项目检查频率从每日改为每周 |

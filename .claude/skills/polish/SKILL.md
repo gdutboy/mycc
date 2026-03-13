@@ -1,6 +1,6 @@
 ---
 name: polish
-description: 打磨文章语言，提升可读性和说服力
+description: Use when 用户已有文章初稿，需要润色表达、增强可读性、压缩啰嗦或提升说服力时触发；不用于从零写全文、只列提纲或只做公众号排版的场景
 layer: 领域层
 authorization: A区（自动执行）
 output_levels: L2（带改进说明）

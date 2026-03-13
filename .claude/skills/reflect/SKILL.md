@@ -1,6 +1,6 @@
 ---
 name: reflect
-description: 记录故障异常，定期反思提炼改进方案
+description: Use when 执行失败、出现故障、遇到异常或需要事后复盘经验教训时触发；不用于普通状态汇报、轻量说明或尚未发生问题的场景
 layer: 基础层
 authorization: A区（自动执行，无需人类介入）
 output_levels: L1（结论）+ L2（过程记录）

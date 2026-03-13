@@ -1,6 +1,6 @@
 ---
 name: nodejs
-description: Node.js 开发最佳实践指南
+description: Use when 正在开发或改造 Node.js 后端/服务端项目，需要参考通用目录结构、错误处理、API 设计或部署约定时触发；不用于非 Node.js 项目、纯前端页面开发或只解释某段代码的场景
 layer: 领域层
 authorization: A区（自动执行）
 output_levels: L1（指引）

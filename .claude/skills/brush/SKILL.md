@@ -1,6 +1,6 @@
 ---
 name: brush
-description: AI 图片生成，根据描述生成配图
+description: Use when 用户明确要根据文字描述生成配图、封面图、插画或视觉素材时触发，如生成图片、文章配图、封面设计；不用于纯文字排版、页面开发或只讨论视觉风格的场景
 layer: 原子层
 authorization: A区（自动执行）
 output_levels: L1（结论）

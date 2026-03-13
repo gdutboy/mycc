@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: 创建、测试和优化 Claude Code Skill。当用户要创建新 skill、改进现有 skill、测试 skill 效果、优化 skill 触发精度时使用。即使用户只说"把这个变成 skill"或"新建技能"也要触发。
+description: Use when 用户要创建新 skill、把现有流程沉淀成 skill、修改已有 skill、测试 skill 效果或校准 skill 触发精度时触发；不用于仅解释 skill 是什么、如何工作，或只做审阅、点评、漏洞检查这类分析请求的场景
 ---
 
 # Skill Creator

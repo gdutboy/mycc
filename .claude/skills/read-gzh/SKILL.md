@@ -1,6 +1,6 @@
 ---
 name: read-gzh
-description: 读取微信公众号文章并总结
+description: Use when 用户提供公众号文章链接，希望读取正文、提炼摘要、提取关键信息或批量整理内容时触发；不用于普通网页阅读、非公众号链接处理或直接生成新文章的场景
 layer: 执行层
 authorization: A区（自动执行，无需人类介入）
 output_levels: L1（结论）, L4（深度分析）

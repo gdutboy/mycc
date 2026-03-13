@@ -1,6 +1,6 @@
 ---
 name: gzh
-description: 将 Markdown 文章渲染成公众号可用格式
+description: Use when 用户已经有文章内容，需要转成微信公众号可发布格式时触发，如公众号排版、渲染、生成可贴入编辑器的版本；不用于写正文、润色内容或只生成标题的场景
 layer: 领域层
 authorization: A区（自动执行）
 output_levels: L1（结论）

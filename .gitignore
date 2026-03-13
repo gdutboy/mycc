@@ -130,3 +130,17 @@ package-lock.json
 2-Projects/stockquant-v3-phase3-implementation/cloudfunctions/aiPricePredictor/real_stock_data_enhanced_v2.json
 2-Projects/stockquant-v3-phase3-implementation/cloudfunctions/aiPricePredictor/real_stock_data_v3_large.json
 __pycache__/
+
+# ====================================
+# 开发项目代码（只保留索引/概要文件）
+# ====================================
+miniprogram/
+wechat-ai-assistant/
+2-Projects/quant-trading-system/
+2-Projects/stockquant-v3-phase1-implementation/
+2-Projects/stockquant-v3-phase2-implementation/
+2-Projects/stockquant-v3-phase3-implementation/
+2-Projects/stockquant-v3-phase4-implementation/
+2-Projects/wechat-robot/
+2-Projects/tools/
+4-Assets/技术调研/CLI-Anything/

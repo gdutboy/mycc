@@ -1,0 +1,264 @@
+// PostToolUse hook：通过 JSON additionalContext 向 AI 反馈（多信号检测 + stdin 工具类型过滤 + TodoWrite 同步提醒）
+const fs = require('fs');
+const path = require('path');
+let paceUtils;
+try { paceUtils = require('./pace-utils.cjs'); } catch(e) {
+  process.stderr.write(`PACE: pace-utils.js 加载失败: ${e.message}\n`);
+  process.exit(0);
+}
+const { isPaceProject, countCodeFiles, readActive, readFull, checkArchiveFormat, ARTIFACT_FILES, countByStatus, VAULT_PATH, findMissingImplDetails, findMissingFindingsDetails, ts, FORMAT_SNIPPETS, ARCHIVE_MARKER, extractOpenKeys } = paceUtils;
+
+const LOG = path.join(__dirname, 'pace-hooks.log');
+// W-8: 使用共享日志轮转函数
+const log = paceUtils.createLogger(LOG);
+const cwd = paceUtils.resolveProjectCwd();
+
+const PACE_RUNTIME = path.join(cwd, '.pace');
+
+// S-1: 统一 stdin 解析
+paceUtils.withStdinParsed((stdin) => {
+  try {
+  // H-1: 非 PACE 项目直接放行（.pace/disabled 豁免）
+  if (!isPaceProject(cwd)) return;
+
+  const { toolName, filePath, oldString, newString } = stdin;
+
+  const warnings = [];
+  // W-dry-4: 每会话首次提醒辅助函数（flag 检查+写入去重）
+  function warnOnce(flagName, message) {
+    const flagFile = path.join(PACE_RUNTIME, flagName);
+    if (fs.existsSync(flagFile)) return false;
+    warnings.push(message);
+    // W-12: 确保 .pace/ 目录存在（极端边缘：PostToolUse 先于 SessionStart 触发时）
+    try { fs.mkdirSync(PACE_RUNTIME, { recursive: true }); } catch(e) {}
+    try { fs.writeFileSync(flagFile, '1', 'utf8'); } catch(e) {}
+    return true;
+  }
+  const fileName = filePath ? path.basename(filePath) : '';
+  const isArtifactEdit = ARTIFACT_FILES.includes(fileName);
+
+  const taskActive = readActive(cwd, 'task.md');
+
+  // v4.3.4: 检测 Stop 降级标记
+  const degradedFile = path.join(PACE_RUNTIME, 'degraded');
+  if (fs.existsSync(degradedFile)) {
+    try {
+      const degradedContent = fs.readFileSync(degradedFile, 'utf8').trim();
+      warnings.push(`Stop hook 已降级（连续阻止 3 次），请检查未通过的 PACE 检查项：${degradedContent.split('\n')[0]}`);
+    } catch(e) {
+      warnings.push(`Stop hook 已降级，请检查 .pace/degraded 文件`);
+    }
+  }
+
+  if (taskActive) {
+    // 0. ARCHIVE 格式检查（仅编辑 artifact 文件时）
+    if (isArtifactEdit) {
+      const archFmt = checkArchiveFormat(cwd, fileName);
+      if (archFmt) warnings.push(archFmt);
+    }
+
+    // 1. W2: 统一使用 countByStatus（仅顶层任务）
+    const { pending: pendingCount, done: doneCount } = countByStatus(taskActive, { topLevelOnly: true });
+    // H3: 归档提醒 → 每会话首次（Stop exit 2 兜底）
+    if (doneCount > 0) warnOnce('archive-reminded', `task.md 活跃区有 ${doneCount} 个已完成项，请归档到 ARCHIVE 下方。${FORMAT_SNIPPETS.archiveOp}`);
+    // H4(impl_plan 一致性) + H5(walkthrough 日期) 已删除：Stop W3/W4 完全覆盖
+
+    // v4.3.6 方案 C：编辑 task.md 后提醒同步 TodoWrite（复用 doneCount，避免与归档提醒重叠）
+    if (fileName === 'task.md') {
+      if (doneCount > 0) {
+        // 有已完成项时，归档提醒已在上方触发，只附加 TodoWrite 同步提示
+        warnings.push(`归档后请同步更新 TodoWrite（标记完成或清空）`);
+      } else {
+        if (pendingCount > 0) {
+          warnings.push(`task.md 有 ${pendingCount} 个活跃任务，请用 TodoWrite 同步对应的 todo 项`);
+        }
+      }
+    }
+
+    // APPROVED/VERIFIED 自签检测：Edit 添加标记时提醒用户确认
+    if (fileName === 'task.md' && newString) {
+      const markers = ['<!-- APPROVED -->', '<!-- VERIFIED -->'];
+      for (const marker of markers) {
+        if (newString.includes(marker) && !oldString.includes(marker)) {
+          warnings.push(`检测到 ${marker} 被添加到 task.md，请确认此操作已获用户审核`);
+        }
+      }
+    }
+
+    // H9: CHG 完成时检查关联 findings 状态（实时 hook）
+    // T-282: 提前读取 findings 活跃区，供 H9 和 H7 共用
+    const findingsActive = readActive(cwd, 'findings.md');
+    if (fileName === 'implementation_plan.md' && newString) {
+      const chgDone = newString.match(/^- \[x\] ((?:CHG|HOTFIX)-\d{8}-\d{2})/gm);
+      const chgOld = oldString.match(/^- \[x\] ((?:CHG|HOTFIX)-\d{8}-\d{2})/gm);
+      // 只检测本次新标为 [x] 的 CHG/HOTFIX
+      if (chgDone) {
+        const oldSet = new Set((chgOld || []).map(m => m.match(/((?:CHG|HOTFIX)-\d{8}-\d{2})/)[0]));
+        const newlyDone = chgDone.map(m => m.match(/((?:CHG|HOTFIX)-\d{8}-\d{2})/)[0]).filter(id => !oldSet.has(id));
+        if (newlyDone.length > 0 && findingsActive) {
+            const stale = [];
+            for (const chgId of newlyDone) {
+              const re = new RegExp(`^- \\[ \\] .+\\[change:: ${chgId}\\]`, 'gm');
+              const hits = findingsActive.match(re) || [];
+              hits.forEach(h => stale.push({ chgId, line: h.slice(6, 60) }));
+            }
+            if (stale.length > 0) {
+              warnings.push(`CHG 已完成但关联 finding 仍为 [ ]：${stale.map(s => s.chgId + ' → ' + s.line).join('；')}，请更新为 [x]`);
+            }
+        }
+      }
+    }
+
+    // T-282: 一次性读取 impl_plan 活跃区，供 H10 和 H13 共用
+    const planActive = readActive(cwd, 'implementation_plan.md');
+
+    // H10: implementation_plan.md 活跃区详情归档提醒 → 每会话首次
+    if (planActive && !fs.existsSync(path.join(PACE_RUNTIME, 'impl-archive-reminded'))) {
+        const doneIndex = planActive.match(/^- \[(?:x|-)\] ((?:CHG|HOTFIX)-\d{8}-\d{2})/gm) || [];
+        const doneIds = new Set(doneIndex.map(m => m.match(/((?:CHG|HOTFIX)-\d{8}-\d{2})/)[0]));
+        const detailHeaders = planActive.match(/^### ((?:CHG|HOTFIX)-\d{8}-\d{2})/gm) || [];
+        const staleDetails = detailHeaders.map(h => h.match(/((?:CHG|HOTFIX)-\d{8}-\d{2})/)[0]).filter(id => doneIds.has(id));
+        if (staleDetails.length > 0) {
+          warnOnce('impl-archive-reminded', `implementation_plan.md 活跃区有 ${staleDetails.length} 个已完成变更详情未归档：${staleDetails.join(', ')}。${FORMAT_SNIPPETS.archiveOp}`);
+        }
+    }
+
+    // H13v2: impl_plan 详情完整性检查（每次编辑 impl_plan 后触发，非一次性）
+    if (fileName === 'implementation_plan.md') {
+      const planFullH13 = readFull(cwd, 'implementation_plan.md');
+      if (planFullH13) {
+        const missingDetails = findMissingImplDetails(planFullH13);
+        if (missingDetails.length > 0) {
+          const display = missingDetails.length <= 3 ? missingDetails.join(', ') : missingDetails.slice(0, 3).join(', ') + ` 等 ${missingDetails.length} 个`;
+          warnings.push(`impl_plan 有已完成变更缺少详情段落：${display}。请补充详情记录具体变更内容。格式：${FORMAT_SNIPPETS.implDetail}`);
+        }
+      }
+    }
+
+    // H7: findings.md ⚠️ 提醒 → 每会话首次（复用上方 findingsActive）
+    if (findingsActive) {
+      const unresolved = (findingsActive.match(/⚠️/g) || []).length;
+      if (unresolved > 0) warnOnce('findings-reminded', `findings.md 有 ${unresolved} 个未解决问题（⚠️），请检查是否需要处理`);
+
+      // H8: 否定决策理由提醒（增强版 v4.5）
+      if (fileName === 'findings.md') {
+        // H11: Correction 双写提醒 — 检测新增 correction，提醒同步写入 knowledge/
+        if (newString && /### Correction:/.test(newString)) {
+          warnings.push('检测到新 Correction 写入 findings.md。请评估是否为跨项目通用经验：如果是，同步写入 knowledge/ 对应笔记并在 correction 条目补 [knowledge:: 笔记名]；如果仅限本项目，补 [knowledge:: project-only]');
+        }
+
+        // 扩展：[-] 条目理由 < 10 字
+        const skippedLines = findingsActive.match(/^- \[-\] .+$/gm) || [];
+        for (const line of skippedLines) {
+          // 提取"—"或"："后的理由部分
+          const reasonMatch = line.match(/[—:：]\s*(.+)$/);
+          const reason = reasonMatch ? reasonMatch[1].trim() : '';
+          if (reason.length < 10) {
+            warnings.push(`findings [-] 条目理由不足: "${line.slice(6, 50)}..." 请补充否定决策理由`);
+            break; // 只报第一个
+          }
+        }
+        // 原有"保持现状"检测保留
+        const keepCount = (findingsActive.match(/保持现状/g) || []).length;
+        if (keepCount > 0) {
+          warnings.push(`findings.md 有 ${keepCount} 条"保持现状"条目，请确认已记录否定理由（为什么不做）`);
+        }
+      }
+
+      // H14: findings 详情完整性检查（仿 H13，每次编辑 findings 都触发）
+      if (fileName === 'findings.md' && newString && /^- \[ \] /m.test(newString)) {
+        const findingsFull = readFull(cwd, 'findings.md');
+        if (findingsFull) {
+          const missingDetails = findMissingFindingsDetails(findingsFull);
+          if (missingDetails.length > 0) {
+            const display = missingDetails.length <= 2
+              ? missingDetails.join('；')
+              : missingDetails[0] + ` 等 ${missingDetails.length} 个`;
+            warnings.push(`findings.md 有 [ ] 索引缺少详情段落：${display}。请在"## 未解决问题"下补充"### [日期] 标题"记录问题背景和修复方向`);
+          }
+        }
+      }
+
+      // T-382: findings 归档提醒 — 活跃区 [x]/[-] 详情段落存在时 warnOnce
+      if (fileName === 'findings.md') {
+        const openKeys = extractOpenKeys(findingsActive);
+        const staleHeaders = findingsActive.match(/^### \[\d{4}-\d{2}-\d{2}\] (.+)/gm) || [];
+        const staleCount = staleHeaders.filter(h => {
+          const title = h.replace(/^### \[\d{4}-\d{2}-\d{2}\] /, '');
+          return !openKeys.some(p => title.includes(p));
+        }).length;
+        if (staleCount > 0) {
+          warnOnce('findings-archive-reminded', `findings 活跃区有 ${staleCount} 个已解决详情段落，请归档到 ${ARCHIVE_MARKER} 下方。${FORMAT_SNIPPETS.archiveOp}`);
+        }
+      }
+    }
+
+    // T-381: walkthrough 归档提醒 — 活跃区详情 > 3 时 warnOnce
+    if (fileName === 'walkthrough.md') {
+      const walkActive = readActive(cwd, 'walkthrough.md');
+      if (walkActive) {
+        const detailCount = (walkActive.match(/^## \d{4}-\d{2}-\d{2}/gm) || []).length;
+        if (detailCount > 3) {
+          warnOnce('walkthrough-archive-reminded', `walkthrough 活跃区有 ${detailCount} 个详情段落（建议保留最近 3 个），请将旧详情归档到 ${ARCHIVE_MARKER} 下方。${FORMAT_SNIPPETS.archiveOp}`);
+        }
+      }
+    }
+  } else {
+    // task.md 不存在时：v4.3 多信号检测
+    const paceSignal = isPaceProject(cwd);
+    if (paceSignal === 'superpowers' || paceSignal === 'manual') {
+      warnings.push(`检测到 PACE 激活信号（${paceSignal}）但 task.md 不存在，请先创建 Artifact 文件。task.md 格式：${FORMAT_SNIPPETS.taskEntry}`);
+    } else {
+      const codeCount = countCodeFiles(cwd);
+      if (codeCount >= 3) {
+        warnings.push(`检测到 ${codeCount} 个代码文件但 task.md 不存在。如果这是 PACE 任务，请先创建 Artifact 文件。task.md 格式：${FORMAT_SNIPPETS.taskEntry}`);
+      }
+    }
+  }
+
+  // H12: Obsidian 索引刷新 — artifact 写入后异步触发（每会话 1 次，fire-and-forget）
+  // 无论 CLI 是否成功，每会话只触发一次（flag 在 spawn 后立即写入）
+  const cliRefreshFile = path.join(PACE_RUNTIME, 'cli-refresh-done');
+  if (isArtifactEdit && filePath && VAULT_PATH && !fs.existsSync(cliRefreshFile)) {
+    try {
+      // Windows 大小写不敏感，比较时统一小写（与 pre-tool-use.js 一致）
+      // S-1: filePath 已由 parseHookStdin normalize，只需 toLowerCase
+      const normFile = filePath.toLowerCase();
+      const normVault = VAULT_PATH.replace(/\\/g, '/').toLowerCase();
+      if (normFile.startsWith(normVault + '/')) {
+        const relPath = path.relative(VAULT_PATH, filePath).replace(/\\/g, '/');
+        const { spawn } = require('child_process');
+        // fire-and-forget：CLI 读取文件促进 Obsidian 感知外部变更
+        const child = spawn('obsidian', ['read', '--file', relPath], {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true
+        });
+        // H-1: 防御性 error 监听（fire-and-forget 模式下 ENOENT 等不会未捕获）
+        child.on('error', () => {});
+        child.unref();
+        // W-4: flag 在 spawn 后写入——若 spawn 同步抛错（ENOENT），catch 捕获，flag 不写入，允许下次重试
+        fs.writeFileSync(cliRefreshFile, '1', 'utf8');
+      }
+    } catch(e) {
+      // CLI 不可用（未安装/Obsidian 未运行），静默跳过，不写 flag 允许下次重试
+    }
+  }
+
+  // I-8: warnings 通过 additionalContext 输出给 AI（单条拼接，非逐条输出）
+  if (warnings.length > 0) {
+    const ctx = `PACE 提醒：${warnings.join('；')}`;
+    const output = {
+      hookSpecificOutput: {
+        hookEventName: "PostToolUse",
+        additionalContext: ctx
+      }
+    };
+    process.stdout.write(JSON.stringify(output));
+    log(`[${ts()}] PostToolUse | cwd: ${cwd}\n  action: WARN | tool: ${toolName} | file: ${filePath || '-'} | checks: ${warnings.length} 项\n  output→AI: ${ctx}\n`);
+  }
+  // PASS: 常规事件，不记录日志
+  } catch(e) {
+    try { log(`[${ts()}] PostToolUse | cwd: ${cwd}\n  action: ERROR | ${e.message}\n`); } catch(e2) {}
+  }
+});

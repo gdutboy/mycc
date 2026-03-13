@@ -1,6 +1,6 @@
 ---
 name: heartbeat
-description: 定时唤醒，从焦点池挑任务思考并回报主 cc
+description: Use when 定时心跳任务触发，需要从焦点池自动挑选事项做后台巡逻、检查或轻量处理时触发；不用于用户主动发起的普通开发任务、手动问题分析或仅解释 heartbeat 机制的场景
 layer: 基础层
 authorization: A区（自动执行，无需人类介入）
 output_levels: L1（结论）
@@ -40,6 +40,17 @@ hunger = wait_hours × frequency_weight
 **若挑中 f6（scheduler 运行状态）**：读 `.claude/skills/scheduler/history.md`，检查：
 1. 是否有"执行中..."超过1小时的任务（卡住检测）
 2. 统计最近24小时任务成功率
+
+**若挑中 f9（Skill 缺口扫描）**：
+1. 扫描最近会话记录（可通过 git log 或 status.md 获取）
+2. 分析对话中暴露的能力缺口（如：需要OCR、需要数据库操作、需要XX技能）
+3. 若发现新缺口，写入 `0-Skill-Platform/skill-wishlist.md`（选修池）
+4. 用飞书通知 gdutboy
+
+**若挑中 f10（热点采集）**：
+1. 扫描 GitHub Trending（使用 /gh-trending skill）
+2. 采集行业资讯（使用 /collect skill）
+3. 生成简报，推送飞书
 
 **若挑中其他焦点**：围绕该焦点思考，产出洞察或建议。
 

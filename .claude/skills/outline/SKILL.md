@@ -1,6 +1,6 @@
 ---
 name: outline
-description: 根据主题生成结构化文章大纲
+description: Use when 用户明确要为文章、公众号、分享稿或专题内容生成结构化提纲时触发，如列大纲、拆章节、整理写作结构；不用于直接写正文、润色成稿或只讨论选题方向的场景
 layer: 领域层
 authorization: A区（自动执行）
 output_levels: L1（结论）

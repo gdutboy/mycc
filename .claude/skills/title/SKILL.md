@@ -1,6 +1,6 @@
 ---
 name: title
-description: 根据文章主题生成吸引人的公众号标题
+description: Use when 用户明确要为公众号文章、内容选题或已写好的稿子生成标题备选时触发，如起标题、想标题、标题优化；不用于直接写正文、生成大纲或只讨论传播策略的场景
 layer: 领域层
 authorization: A区（自动执行）
 output_levels: L1（结论）

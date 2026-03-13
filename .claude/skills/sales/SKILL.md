@@ -1,6 +1,6 @@
 ---
 name: sales
-description: DCFCS 销售框架，生成定制销售策略和话术
+description: Use when 用户需要制定销售策略、梳理销售流程、设计销售话术或推进成交方案时触发；不用于普通产品文案、品牌宣传写作或泛化商业分析的场景
 layer: 分析层
 authorization: A区（自动执行，无需人类介入）
 output_levels: L1（策略方案）、L3（重大商务决策时）
