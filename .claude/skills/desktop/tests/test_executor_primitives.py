@@ -49,6 +49,10 @@ class FakeInputAdapter:
         self.calls.append(("move_to", x, y))
         return f"moved:{x}:{y}"
 
+    def scroll(self, clicks):
+        self.calls.append(("scroll", clicks))
+        return f"scrolled:{clicks}"
+
     def type_text(self, text):
         self.calls.append(("type_text", text))
         return f"typed:{text}"
@@ -207,6 +211,44 @@ def test_hotkey_calls_input_adapter_hotkey():
     assert result["action"] == "hotkey"
     assert result["keys"] == ["ctrl", "v"]
     assert adapter.calls == [("hotkey", ("ctrl", "v"))]
+
+
+def test_scroll_calls_input_adapter_after_safety_check_passes():
+    adapter = FakeInputAdapter()
+    executor = build_executor(input_adapter=adapter)
+
+    result = executor.scroll(-5, safety={"level": "yellow"})
+
+    assert result["ok"] is True
+    assert result["action"] == "scroll"
+    assert result["clicks"] == -5
+    assert result["context"] == {
+        "safety_level": "yellow",
+        "dangerous": False,
+        "confirm_required": False,
+        "confirmed": False,
+    }
+    assert adapter.calls == [("scroll", -5)]
+
+
+def test_scroll_returns_unsafe_action_without_touching_adapter_when_confirmation_missing():
+    adapter = FakeInputAdapter()
+    executor = build_executor(input_adapter=adapter)
+
+    result = executor.scroll(-5, safety={"level": "red", "dangerous": True, "confirm_required": True})
+
+    assert result["ok"] is False
+    assert result["action"] == "scroll"
+    assert result["reason"] == "unsafe_action"
+    assert adapter.calls == []
+
+
+def test_scroll_returns_dependency_unavailable_when_input_adapter_missing():
+    executor = build_executor(input_adapter=None)
+
+    result = executor.scroll(0)
+
+    assert result == failure_result("scroll", "dependency_unavailable", "input_adapter is unavailable", {"dependency": "input_adapter"})
 
 
 def test_click_returns_unsafe_action_without_touching_adapter_when_confirmation_missing():

@@ -29,6 +29,11 @@ def click(x=None, y=None, button="left", double=False):
     return "点击当前位置"
 
 
+def scroll(clicks):
+    pyautogui.scroll(clicks)
+    return f"滚动: {clicks}"
+
+
 def press_key(key):
     normalized = KEY_MAP.get(key.lower(), key)
     pyautogui.press(normalized)

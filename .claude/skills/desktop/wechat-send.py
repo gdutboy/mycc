@@ -15,9 +15,12 @@ import asyncio
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import pyautogui
 import pygetwindow as gw
 from PIL import ImageEnhance
+from core.runtime import build_executor
 
 try:
     import winocr
@@ -57,6 +60,8 @@ async def send_message(message):
         print("[error] 微信窗口未找到", file=sys.stderr)
         sys.exit(1)
 
+    executor = build_executor()
+
     # 1. 激活微信
     try:
         win.activate()
@@ -71,15 +76,15 @@ async def send_message(message):
     # 3. 点击输入框（聊天区域底部中央）
     input_x = win.left + SIDEBAR + (win.width - SIDEBAR) // 2
     input_y = win.top + win.height - 50
-    pyautogui.click(input_x, input_y)
+    executor.click(input_x, input_y)
     time.sleep(0.2)
 
     # 4. 粘贴
-    pyautogui.hotkey('ctrl', 'v')
+    executor.hotkey('ctrl', 'v')
     time.sleep(0.3)
 
     # 5. 回车发送
-    pyautogui.press('enter')
+    executor.press('enter')
 
     # 6. 等待后验证
     time.sleep(1.0)

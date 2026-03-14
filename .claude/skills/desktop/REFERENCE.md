@@ -105,6 +105,57 @@ python $DESKTOP --hotkey ctrl a   # 全选
 | 局部 OCR | 0.2–0.5s |
 | 窗口列表 | < 100ms |
 
+## Runtime 架构
+
+Desktop Skill 内部使用分层 runtime 架构：
+
+```
+desktop.py / wechat-send.py（CLI 入口）
+    ↓
+core/runtime.py → build_executor()
+    ↓
+core/executor.py → Executor（12 个 primitive）
+    ├── 观察: find / read（→ Router）
+    ├── 输入: click / double_click / right_click / move / scroll / type / press / hotkey（→ InputAdapter）
+    ├── 断言: assert_（→ Router）
+    └── 等待: wait（→ Router）
+    ↓
+core/flow.py → run_flow()（流程编排）
+    └── 按顺序执行 steps，失败即停
+    ↓
+core/safety.py → ensure_action_allowed()（输入类动作安全校验）
+adapters/input.py → 底层 pyautogui 封装
+adapters/screen.py → 截图
+adapters/windows.py → 窗口管理
+```
+
+**关键设计**：
+- 所有输入类操作统一走 `Executor`，不直接调用 `pyautogui`
+- `build_executor()` 从 `core.runtime` 导入，`desktop.py` 和 `wechat-send.py` 共享同一组装逻辑
+- 输入动作执行前经 `ensure_action_allowed()` 安全校验
+
+## Flow 编排
+
+`core/flow.py` 提供 `run_flow(executor, steps)` 函数，按顺序执行一组动作：
+
+```python
+from core.flow import run_flow
+from core.runtime import build_executor
+
+executor = build_executor()
+result = run_flow(executor, [
+    {"action": "click", "args": [500, 300]},
+    {"action": "type", "kwargs": {"text": "hello"}},
+    {"action": "press", "kwargs": {"key": "enter"}},
+    {"action": "wait", "kwargs": {"target": "发送成功"}},
+])
+# result["ok"] = True/False, result["steps_completed"] = N
+```
+
+- 支持动作：`click`、`type`、`press`、`wait`
+- 失败即停：某步返回 `ok=False` 时立即中断，返回失败 step 索引和错误
+- 非法动作：`action` 不在白名单时返回 `unsupported_action`
+
 ## 安全禁区
 
 - 不操控系统关键窗口（任务管理器、注册表等）

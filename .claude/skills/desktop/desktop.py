@@ -13,6 +13,7 @@ import io
 import asyncio
 
 from adapters import input as input_adapter, screen as screen_adapter, windows as windows_adapter
+from core.runtime import build_executor
 
 
 # 修复 Windows 中文输出
@@ -339,6 +340,8 @@ async def find_icon(icon_name, row=None):
 
 async def async_main(args):
     """异步主函数（处理需要 await 的 OCR 调用）"""
+    executor = build_executor()
+
     # 执行命令
     if args.screenshot or (args.ocr and not args.cursor):
         img = screenshot(args.screenshot, args.region)
@@ -370,25 +373,25 @@ async def async_main(args):
         print(get_cursor_position())
 
     elif args.move:
-        print(move_mouse(args.move[0], args.move[1]))
+        print(json.dumps(executor.move(args.move[0], args.move[1]), ensure_ascii=False))
 
     elif args.click:
-        print(click(args.click[0], args.click[1]))
+        print(json.dumps(executor.click(args.click[0], args.click[1]), ensure_ascii=False))
 
     elif args.double_click:
-        print(click(args.double_click[0], args.double_click[1], double=True))
+        print(json.dumps(executor.double_click(args.double_click[0], args.double_click[1]), ensure_ascii=False))
 
     elif args.right_click:
-        print(right_click(args.right_click[0], args.right_click[1]))
+        print(json.dumps(executor.right_click(args.right_click[0], args.right_click[1]), ensure_ascii=False))
 
     elif args.type:
-        print(type_text(args.type))
+        print(json.dumps(executor.type(args.type), ensure_ascii=False))
 
     elif args.press:
-        print(press_key(args.press))
+        print(json.dumps(executor.press(args.press), ensure_ascii=False))
 
     elif args.hotkey:
-        print(hotkey(*args.hotkey))
+        print(json.dumps(executor.hotkey(*args.hotkey), ensure_ascii=False))
 
     elif args.windows:
         print(list_windows())
