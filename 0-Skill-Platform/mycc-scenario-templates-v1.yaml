@@ -1,0 +1,324 @@
+version: "v1"
+templates:
+  - id: tpl-content-001
+    name: 选题 -> 标题包
+    category: content
+    triggers:
+      - 关键词：选题、起标题、标题候选
+      - 模式：简短主题描述
+    entry_skill: outline
+    fallback_skill: title
+    inputs:
+      - name: topic
+        type: string
+        required: true
+        description: 选题/主题描述
+    workflow:
+      - skill: outline
+        description: 生成结构化提纲
+      - skill: title
+        description: 基于提纲生成标题候选
+      - skill: tell-me
+        description: 推送结果到飞书
+    outputs:
+      - 提纲大纲
+      - 标题候选列表（5-10个）
+    acceptance: |
+      1. 提纲包含 3-5 个主要章节
+      2. 标题候选至少 5 个
+      3. 结果已推送飞书
+    notify:
+      enabled: true
+      channel: feishu
+      level: blue
+
+  - id: tpl-content-002
+    name: 主题 -> 公众号初稿
+    category: content
+    triggers:
+      - 关键词：写文章、公众号、创作
+      - 模式：给定主题或大纲
+    entry_skill: draft
+    fallback_skill: create-system
+    inputs:
+      - name: topic
+        type: string
+        required: true
+        description: 文章主题
+      - name: outline
+        type: string
+        required: false
+        description: 可选大纲
+    workflow:
+      - skill: draft
+        description: 生成文章初稿
+      - skill: polish
+        description: 润色表达
+      - skill: gzh
+        description: 转换为公众号格式
+    outputs:
+      - 文章初稿
+      - 润色版本
+      - 公众号可发布格式
+    acceptance: |
+      1. 初稿字数 800-2000
+      2. 包含润色调整
+      3. 公众号格式完整
+    notify:
+      enabled: true
+      channel: feishu
+      level: blue
+
+  - id: tpl-content-003
+    name: 热点 -> 观点短文
+    category: content
+    triggers:
+      - 关键词：热点、观点、评论
+      - 模式：提及具体事件/话题
+    entry_skill: collect
+    fallback_skill: draft
+    inputs:
+      - name: topic
+        type: string
+        required: true
+        description: 热点话题
+    workflow:
+      - skill: collect
+        description: 采集背景信息
+      - skill: draft
+        description: 撰写观点短文
+      - skill: polish
+        description: 优化表达
+    outputs:
+      - 背景资料摘要
+      - 观点短文（300-800字）
+    acceptance: |
+      1. 包含话题背景
+      2. 观点明确，有分析角度
+      3. 字数符合预期
+    notify:
+      enabled: true
+      channel: feishu
+      level: blue
+
+  - id: tpl-collect-001
+    name: 每日综合简报
+    category: collect
+    triggers:
+      - 关键词：每日简报、每日汇总、日报
+      - 模式：定时或手动触发
+    entry_skill: collect
+    fallback_skill: tell-me
+    inputs:
+      - name: date
+        type: string
+        required: false
+        description: 日期（默认今天）
+    workflow:
+      - skill: collect
+        description: 采集多源信息
+      - skill: tell-me
+        description: 推送简报到飞书
+    outputs:
+      - 信息来源链接
+      - 分类筛选统计
+      - 行动项建议
+    acceptance: |
+      1. 包含至少 3 个信息来源链接
+      2. 有分类过滤和统计
+      3. 包含具体行动项
+      4. 已推送飞书
+    notify:
+      enabled: true
+      channel: feishu
+      level: blue
+
+  - id: tpl-collect-002
+    name: GitHub AI 趋势播报
+    category: collect
+    triggers:
+      - 关键词：GitHub 趋势、AI 趋势、Trending
+      - 模式：请求特定领域趋势
+    entry_skill: gh-trending
+    fallback_skill: collect
+    inputs:
+      - name: language
+        type: string
+        required: false
+        description: 编程语言筛选
+      - name: period
+        type: string
+        required: false
+        description: 时间范围（daily/weekly/monthly）
+    workflow:
+      - skill: gh-trending
+        description: 采集 GitHub 趋势
+      - skill: tell-me
+        description: 推送趋势到飞书
+    outputs:
+      - 项目来源链接
+      - 分类过滤筛选结果
+      - 星数统计
+      - 关注/克隆行动建议
+    acceptance: |
+      1. 包含项目来源链接
+      2. 有语言/分类筛选
+      3. 包含 star 数量统计
+      4. 已推送飞书
+    notify:
+      enabled: true
+      channel: feishu
+      level: blue
+
+  - id: tpl-collect-003
+    name: 公众号链接拆解
+    category: collect
+    triggers:
+      - 关键词：公众号链接、拆解文章、解读
+      - 模式：提供公众号文章链接
+    entry_skill: read-gzh
+    fallback_skill: create-system
+    inputs:
+      - name: url
+        type: string
+        required: true
+        description: 公众号文章链接
+    workflow:
+      - skill: read-gzh
+        description: 读取并解析公众号内容
+      - skill: create-system
+        description: 可选二次创作
+    outputs:
+      - 原文来源链接
+      - 内容摘要
+      - 核心观点提取
+    acceptance: |
+      1. 包含原文链接
+      2. 有内容摘要（含过滤筛选）
+      3. 提取核心观点
+      4. 包含转发/行动建议
+      5. 已推送飞书（如选择推送）
+    notify:
+      enabled: true
+      channel: feishu
+      level: blue
+
+  - id: tpl-dev-001
+    name: 需求 -> 单 Agent 实现
+    category: dev
+    triggers:
+      - 关键词：实现、开发、写代码、修复
+      - 模式：描述具体需求
+    entry_skill: dev
+    fallback_skill: none
+    inputs:
+      - name: requirement
+        type: string
+        required: true
+        description: 具体需求描述
+    workflow:
+      - skill: dev
+        description: 单 Agent 实现需求
+    outputs:
+      - 代码实现
+      - 修改文件列表
+    acceptance: |
+      1. 代码可运行
+      2. 符合需求描述
+      3. 失败时直接红卡（无降级）
+    notify:
+      enabled: false
+      channel: feishu
+      level: blue
+
+  - id: tpl-dev-002
+    name: 需求 -> 多 Agent 并行实现
+    category: dev
+    triggers:
+      - 关键词：并行开发、多模块、复杂需求
+      - 模式：复杂项目需求
+    entry_skill: dev-team
+    fallback_skill: dev
+    inputs:
+      - name: requirement
+        type: string
+        required: true
+        description: 复杂需求描述
+    workflow:
+      - skill: dev-team
+        description: 多 Agent 并行实现
+    outputs:
+      - 各模块代码实现
+      - 集成说明
+    acceptance: |
+      1. 多模块并行开发完成
+      2. 可集成
+      3. 失败时降级到 dev
+    notify:
+      enabled: true
+      channel: feishu
+      level: red
+
+  - id: tpl-dev-003
+    name: 测试质量审查
+    category: dev
+    triggers:
+      - 关键词：测试审查、代码审查、质量检查
+      - 模式：要求审查测试用例
+    entry_skill: test-review
+    fallback_skill: dev
+    inputs:
+      - name: target
+        type: string
+        required: true
+        description: 审查目标（文件/模块/项目）
+    workflow:
+      - skill: test-review
+        description: 审查测试用例
+      - skill: tell-me
+        description: 推送审查结果
+    outputs:
+      - 覆盖率报告
+      - 问题列表
+      - 改进建议
+    acceptance: |
+      1. 覆盖率报告完整
+      2. 列出问题清单
+      3. 包含改进建议
+      4. 已推送飞书
+    notify:
+      enabled: true
+      channel: feishu
+      level: blue
+
+  - id: tpl-general-001
+    name: 定时模板任务注册
+    category: general
+    triggers:
+      - 关键词：定时任务、周期提醒、调度注册
+      - 模式：设置定时执行规则
+    entry_skill: scheduler
+    fallback_skill: tell-me
+    inputs:
+      - name: template_id
+        type: string
+        required: true
+        description: 要注册的模板 ID
+      - name: cron
+        type: string
+        required: true
+        description: Cron 表达式
+    workflow:
+      - skill: scheduler
+        description: 注册/更新定时任务
+    outputs:
+      - 任务 ID
+      - 执行时间表
+    acceptance: |
+      1. 任务注册成功
+      2. 返回任务 ID
+      3. 显示下次执行时间
+    notify:
+      enabled: true
+      channel: feishu
+      level: blue
