@@ -1,6 +1,6 @@
 ---
 name: collect
-description: Use when 用户要采集多源信息并产出简报、汇总或观察清单时触发，如 AI 动态、时政、GitHub、股票等主题；不用于单一事实查询、普通聊天或仅解释信息来源的场景
+description: 采集多源信息并产出简报（AI/时政/GitHub/股票等）
 layer: 分析层
 authorization: A区（自动执行，无需人类介入）
 output_levels: L1（结论）

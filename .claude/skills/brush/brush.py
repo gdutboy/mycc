@@ -1,13 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import io
-import sys
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 """
 Brush - AI 图片生成脚本
 
-根据描述生成优化的提示词，指导 AI 绘图。
+根据描述生成优化的提示词，调用 CogView / SiliconFlow 生图。
 
 使用方法：
     python brush.py "图片描述"              # 命令行
@@ -20,6 +17,13 @@ import argparse
 import subprocess
 from pathlib import Path
 
+try:
+    import requests
+except ImportError:
+    requests = None
+
+_requests_post = requests.post if requests else None
+
 # 颜色
 GREEN = '\033[92m'
 YELLOW = '\033[93m'
@@ -31,7 +35,7 @@ RESET = '\033[0m'
 def banner():
     print(f"""
 {BLUE}╔═══════════════════════════════════════════════════╗
-║        🎨 Brush - AI 图片生成                     ║
+║        Brush - AI 图片生成                        ║
 ║           根据描述生成优化的提示词                 ║
 ╚═══════════════════════════════════════════════════╝{RESET}
     """)
@@ -54,39 +58,26 @@ QUALITY_PROMPTS = 'high quality, best quality, detailed, masterpiece'
 
 def optimize_prompt(description, style='写实', size='16:9', aspect_ratio=None):
     """优化提示词"""
-    # 基础提示词
     prompt_parts = [description]
 
-    # 添加风格
     if style in STYLE_PROMPTS:
         prompt_parts.append(STYLE_PROMPTS[style])
 
-    # 添加质量
     prompt_parts.append(QUALITY_PROMPTS)
 
-    # 添加尺寸
-    if aspect_ratio:
-        prompt = ', '.join(prompt_parts)
-    else:
-        prompt = ', '.join(prompt_parts)
-
-    # 英文提示词（大多数 AI 绘图支持英文效果更好）
-    return prompt
+    return ', '.join(prompt_parts)
 
 
 def generate_prompt_variants(description, style='写实'):
     """生成多个提示词变体"""
     variants = []
 
-    # 变体1: 详细描述
     detailed = f"{description}, {STYLE_PROMPTS.get(style, '')}, {QUALITY_PROMPTS}, highly detailed"
     variants.append(('详细描述', detailed))
 
-    # 变体2: 简洁版
     simple = f"{description}, {STYLE_PROMPTS.get(style, '')}, clean and simple"
     variants.append(('简洁版', simple))
 
-    # 变体3: 艺术版
     artistic = f"{description}, {STYLE_PROMPTS.get(style, '')}, artistic, creative, unique"
     variants.append(('艺术版', artistic))
 
@@ -97,7 +88,7 @@ def format_output(description, style, size, prompts):
     """格式化输出"""
     output = f"""
 {GREEN}╔═══════════════════════════════════════════════════╗
-║                   🎨 图片提示词生成                   ║
+║                   图片提示词生成                    ║
 ╚═══════════════════════════════════════════════════╝{RESET}
 
 {YELLOW}【图片描述】{RESET}
@@ -120,73 +111,200 @@ def format_output(description, style, size, prompts):
 
     output += f"""
 {GREEN}【使用说明】{RESET}
-1. 将提示词复制到 AI 绘图工具（如 Midjourney、DALL-E、Stable Diffusion）
+1. 将提示词复制到 AI 绘图工具
 2. 根据需要调整提示词
 3. 生成图片
-
-{YELLOW}【推荐工具】{RESET}
-• Midjourney: /imagine prompt: <提示词>
-• DALL-E: 直接在 ChatGPT Plus 中使用
-• Stable Diffusion: 本地部署或在线平台
-• Leonardo.ai: 免费额度，提示词优化
 
 """
 
     return output
 
 
-def send_image_to_feishu(title, image_url, color='blue'):
-    """调用 tell-me/send.js 发送图片 URL 到飞书"""
-    script_path = Path(__file__).resolve().parents[1] / 'tell-me' / 'send.js'
+def _load_feishu_webhook():
+    """从 tell-me/config.json 读取 webhook 地址"""
+    config_path = Path(__file__).resolve().parents[1] / 'tell-me' / 'config.json'
+    try:
+        import json as _json
+        data = _json.loads(config_path.read_text(encoding='utf-8'))
+        return data.get('webhook')
+    except Exception:
+        return None
 
-    if not script_path.exists():
-        print(f"{RED}未找到 send.js：{script_path}{RESET}")
+
+def send_image_to_feishu(title, image_url, color='blue'):
+    """用富文本消息（post）发送图片链接到飞书，手机可直接点击查看"""
+    if not _requests_post:
+        print(f"{RED}缺少 requests 库{RESET}")
         return False
 
-    cmd = [
-        'node',
-        str(script_path),
-        '--image-url',
-        title,
-        image_url,
-        color,
-    ]
+    webhook = _load_feishu_webhook()
+    if not webhook:
+        print(f"{RED}未找到飞书 webhook 配置{RESET}")
+        return False
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode == 0:
-        print(f"{GREEN}✅ 已推送到飞书{RESET}")
-        return True
+    payload = {
+        "msg_type": "post",
+        "content": {
+            "post": {
+                "zh_cn": {
+                    "title": f"🎨 {title}",
+                    "content": [
+                        [
+                            {"tag": "text", "text": "点击查看图片："},
+                            {"tag": "a", "text": "查看原图", "href": image_url},
+                        ]
+                    ]
+                }
+            }
+        }
+    }
 
-    print(f"{RED}❌ 飞书推送失败：{(result.stderr or result.stdout).strip()}{RESET}")
-    return False
+    try:
+        resp = _requests_post(webhook, json=payload, timeout=10)
+        data = resp.json()
+        if data.get('code') == 0 or data.get('StatusCode') == 0:
+            print(f"{GREEN}已推送到飞书{RESET}")
+            return True
+        print(f"{RED}飞书推送失败：{data}{RESET}")
+        return False
+    except Exception as e:
+        print(f"{RED}飞书推送异常：{e}{RESET}")
+        return False
 
 
-def try_generate_image(prompt, api_key=None):
-    """尝试调用 API 生成图片（如果配置了）"""
-    # 这里可以集成各种 AI 绘图 API
-    # 目前返回提示词，由用户手动生成
+# ── 凭据解析 ──
 
-    # 尝试调用 DALL-E API（如果安装了 openai）
-    if api_key:
+
+def resolve_zhipu_credentials():
+    """解析智谱 API Key"""
+    key = os.environ.get('ZHIPU_API_KEY')
+    if key:
+        return key, 'env_zhipu'
+    return None, 'none'
+
+
+def resolve_siliconflow_credentials():
+    """解析 SiliconFlow API Key"""
+    key = os.environ.get('SILICONFLOW_API_KEY')
+    if key:
+        return key, 'env_siliconflow'
+    return None, 'none'
+
+
+# ── 图片生成 ──
+
+
+def _extract_cogview_image_url(response):
+    if response.status_code != 200:
+        return None
+    data = response.json() or {}
+    images = data.get('data') or []
+    if not images:
+        return None
+    return images[0].get('url')
+
+
+def _extract_siliconflow_image_url(response):
+    if response.status_code != 200:
+        return None
+    data = response.json() or {}
+    images = data.get('images') or []
+    if not images:
+        return None
+    return images[0].get('url')
+
+
+def try_generate_image(prompt):
+    """尝试生成图片：CogView 优先 → SiliconFlow 兜底"""
+    if not _requests_post:
+        return None
+
+    failures = []
+    sources = []
+
+    # 1. CogView-3-Flash
+    zhipu_key, zhipu_source = resolve_zhipu_credentials()
+    if zhipu_key:
+        sources.append(zhipu_source)
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key)
-
-            response = client.images.generate(
-                model="dall-e-3",
-                prompt=prompt,
-                size="1792x1024",
-                quality="standard",
-                n=1,
+            response = _requests_post(
+                'https://open.bigmodel.cn/api/paas/v4/images/generations',
+                headers={
+                    'Authorization': f'Bearer {zhipu_key}',
+                    'Content-Type': 'application/json',
+                },
+                json={
+                    'model': 'cogview-3-flash',
+                    'prompt': prompt,
+                },
+                timeout=90,
             )
-
-            return response.data[0].url
-        except ImportError:
-            return None
+            url = _extract_cogview_image_url(response)
+            if url:
+                return url
+            error_msg = _safe_error_text(response)
+            failures.append(('CogView', response.status_code, error_msg))
         except Exception as e:
-            return None
+            failures.append(('CogView', 0, str(e)))
+
+    # 2. SiliconFlow FLUX
+    sf_key, sf_source = resolve_siliconflow_credentials()
+    if sf_key:
+        sources.append(sf_source)
+        try:
+            response = _requests_post(
+                'https://api.siliconflow.cn/v1/images/generations',
+                headers={
+                    'Authorization': f'Bearer {sf_key}',
+                    'Content-Type': 'application/json',
+                },
+                json={
+                    'model': 'black-forest-labs/FLUX.1-schnell',
+                    'prompt': prompt,
+                    'image_size': '1024x1024',
+                },
+                timeout=90,
+            )
+            url = _extract_siliconflow_image_url(response)
+            if url:
+                return url
+            error_msg = _safe_error_text(response)
+            failures.append(('SiliconFlow', response.status_code, error_msg))
+        except Exception as e:
+            failures.append(('SiliconFlow', 0, str(e)))
+
+    # 全部失败
+    if failures or not sources:
+        msg = get_generation_error_message(sources, failures)
+        print(f"{RED}{msg}{RESET}")
 
     return None
+
+
+def _safe_error_text(response):
+    try:
+        data = response.json()
+        err = data.get('error', {})
+        if isinstance(err, dict):
+            return err.get('message', response.text[:200])
+        return str(err) or response.text[:200]
+    except Exception:
+        return response.text[:200]
+
+
+def get_generation_error_message(sources, failures):
+    """生成明确的错误提示信息"""
+    if not sources and not failures:
+        return (
+            "未配置任何图片生成 API Key。请设置环境变量：\n"
+            "  - ZHIPU_API_KEY（智谱 CogView，免费）\n"
+            "  - SILICONFLOW_API_KEY（SiliconFlow FLUX）"
+        )
+
+    lines = ["图片生成失败："]
+    for name, status, msg in failures:
+        lines.append(f"  - {name}: HTTP {status} - {msg}")
+    return '\n'.join(lines)
 
 
 def main():
@@ -198,7 +316,6 @@ def main():
                         help='风格：写实/插画/漫画/极简/抽象/水彩/油画')
     parser.add_argument('--size', '-z', metavar='SIZE', default='16:9',
                         help='尺寸：16:9, 4:3, 1:1, 9:16')
-    parser.add_argument('--api-key', '-k', metavar='KEY', help='OpenAI API Key（可选）')
     parser.add_argument('--image-url', metavar='URL', help='已有图片 URL（无需 API 生成）')
     parser.add_argument('--send-feishu', action='store_true', help='生成成功后自动推送到飞书')
     parser.add_argument('--title', metavar='TITLE', default='AI 生成图片', help='飞书卡片标题')
@@ -207,7 +324,7 @@ def main():
 
     args = parser.parse_args()
 
-    # 直接使用已有图片 URL（无需 API key）
+    # 直接使用已有图片 URL
     if args.image_url:
         print(f"{GREEN}【图片链接】{RESET}\n{args.image_url}\n")
         if args.send_feishu:
@@ -235,18 +352,15 @@ def main():
     variants = generate_prompt_variants(description, args.style)
 
     # 输出提示词
-    print(format_output(description, args.style, args.size, [( '主提示词', main_prompt)] + variants))
+    print(format_output(description, args.style, args.size, [('主提示词', main_prompt)] + variants))
 
     # 尝试生成图片
-    image_url = try_generate_image(main_prompt, args.api_key)
+    image_url = try_generate_image(main_prompt)
     if image_url:
         print(f"{GREEN}【生成图片链接】{RESET}\n{image_url}\n")
 
         if args.send_feishu:
             send_image_to_feishu(args.title, image_url, args.color)
-    else:
-        if args.send_feishu:
-            print(f"{YELLOW}未生成图片：请传入可用 --api-key 后再开启 --send-feishu{RESET}")
 
 
 if __name__ == '__main__':

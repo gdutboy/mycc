@@ -9,7 +9,8 @@
  *   node collect.mjs --save /path/to/dir   # 同时保存各源 JSON 到目录
  */
 
-import { readdir } from 'fs/promises';
+import { readdir, readFile } from 'fs/promises';
+import { existsSync } from 'fs';
 import { spawn } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -17,7 +18,50 @@ import { writeFile, mkdir } from 'fs/promises';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const COLLECTORS_DIR = join(__dirname, 'collectors');
+const CONFIG_DIR = join(__dirname, '..', 'config');
 const TIMEOUT_MS = 60000; // 单个 collector 最大 60 秒
+
+// 加载 JSON 配置（文件不存在时返回默认值）
+async function loadConfig(filename, defaultVal) {
+  const p = join(CONFIG_DIR, filename);
+  if (!existsSync(p)) return defaultVal;
+  try {
+    return JSON.parse(await readFile(p, 'utf-8'));
+  } catch {
+    return defaultVal;
+  }
+}
+
+// c9: 来源白名单过滤（domains 为空则不过滤）
+function applyWhitelist(items, domains) {
+  if (!domains || domains.length === 0) return { items, filtered: 0 };
+  let filtered = 0;
+  const kept = items.filter(item => {
+    if (!item.url) return true; // 无 URL 的条目保留
+    try {
+      const hostname = new URL(item.url).hostname;
+      const pass = domains.some(d => hostname === d || hostname.endsWith('.' + d));
+      if (!pass) filtered++;
+      return pass;
+    } catch {
+      return true;
+    }
+  });
+  return { items: kept, filtered };
+}
+
+// c11: 关键词黑名单过滤
+function applyBlacklist(items, keywords) {
+  if (!keywords || keywords.length === 0) return { items, filtered: 0 };
+  let filtered = 0;
+  const kept = items.filter(item => {
+    const text = `${item.title || ''} ${item.summary || ''}`;
+    const hit = keywords.some(kw => text.includes(kw));
+    if (hit) filtered++;
+    return !hit;
+  });
+  return { items: kept, filtered };
+}
 
 // 解析命令行参数
 function parseArgs() {
@@ -115,6 +159,28 @@ async function main() {
     }
     console.error(`[collect] Saved raw JSON to ${saveDir}`);
   }
+
+  // 加载过滤配置
+  const whitelistCfg = await loadConfig('source-whitelist.json', { domains: [] });
+  const blacklistCfg = await loadConfig('keyword-blacklist.json', { keywords: [] });
+  let totalWhiteFiltered = 0;
+  let totalBlackFiltered = 0;
+
+  // 对每个 source 的 items 应用白名单 + 黑名单过滤
+  for (const r of results) {
+    if (!Array.isArray(r.items)) continue;
+    const w = applyWhitelist(r.items, whitelistCfg.domains);
+    const b = applyBlacklist(w.items, blacklistCfg.keywords);
+    r.items = b.items;
+    totalWhiteFiltered += w.filtered;
+    totalBlackFiltered += b.filtered;
+    if (r.metadata) {
+      r.metadata.total_fetched = r.items.length;
+    }
+  }
+
+  if (totalWhiteFiltered > 0) console.error(`[collect] 白名单过滤: ${totalWhiteFiltered} 条`);
+  if (totalBlackFiltered > 0) console.error(`[collect] 黑名单过滤: ${totalBlackFiltered} 条`);
 
   // 统计
   for (const r of results) {

@@ -9,7 +9,7 @@
  */
 
 import { execSync } from "child_process";
-import { mkdirSync, writeFileSync, existsSync, appendFileSync } from "fs";
+import { mkdirSync, writeFileSync, existsSync, appendFileSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { dirname, basename } from "path";
 import { fileURLToPath } from "url";
@@ -258,6 +258,52 @@ async function startServer(args: string[]) {
     }
   };
 
+  // 根据任务类型选择模型：心跳/清理/提醒类 → haiku，其余 → sonnet
+  const selectModel = (task: Task): string => {
+    const lightSkills = /heartbeat|heart-beat|clean|清理|告警|提醒|remind|notify|status|snapshot/i;
+    return lightSkills.test(task.skill) ? "haiku" : "sonnet";
+  };
+
+  // 幂等任务响应缓存（按任务名+日期 key，存 0-System/agent-cache.json）
+  const CACHEABLE_SKILLS = /heartbeat|heart-beat|clean|清理|告警|提醒|remind|notify|status|snapshot/i;
+  const cachePath = join(cwd, "0-System", "agent-cache.json");
+
+  const loadCache = (): Record<string, { ts: string; model: string }> => {
+    try {
+      if (existsSync(cachePath)) {
+        return JSON.parse(readFileSync(cachePath, "utf-8"));
+      }
+    } catch { /* 静默 */ }
+    return {};
+  };
+
+  const saveCache = (cache: Record<string, { ts: string; model: string }>) => {
+    try {
+      writeFileSync(cachePath, JSON.stringify(cache, null, 2));
+    } catch { /* 静默 */ }
+  };
+
+  const getCacheKey = (task: Task): string => {
+    const today = new Date().toISOString().slice(0, 10);
+    return `${task.name}|${today}`;
+  };
+
+  const isCacheable = (task: Task): boolean => CACHEABLE_SKILLS.test(task.skill);
+
+  // 追加任务成本记录到 0-System/cost-log.jsonl
+  const recordCostLog = (taskCwd: string, entry: {
+    task: string; skill: string; model: string; status: string;
+    durationMs: number; inputTokens: number; outputTokens: number;
+  }) => {
+    const logPath = join(taskCwd, "0-System", "cost-log.jsonl");
+    const line = JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n";
+    try {
+      appendFileSync(logPath, line);
+    } catch {
+      // 静默失败，不影响主流程
+    }
+  };
+
   // 启动定时任务调度器
   const executeTask = async (task: Task, taskCwd: string) => {
     // 获取当前时间戳
@@ -287,15 +333,91 @@ ${skillLine}
     // 记录开始执行
     recordHistory(taskCwd, task.name, "执行中...");
 
-    try {
-      for await (const _event of adapter.chat({ message, cwd: taskCwd, sessionId: task.sessionId })) {
-        // 忽略输出，只需要执行
+    // 缓存命中检查（幂等任务今日已执行则跳过）
+    if (isCacheable(task)) {
+      const cache = loadCache();
+      const key = getCacheKey(task);
+      if (cache[key]) {
+        console.log(chalk.gray(`[Scheduler] 缓存命中，跳过: ${task.name} (${cache[key].ts})`));
+        return;
       }
+    }
+
+    const taskStartTime = Date.now();
+    const primaryModel = selectModel(task);
+
+    // 执行一次 chat，收集 token 用量，返回 inputTokens/outputTokens
+    const runChat = async (model: string) => {
+      let inputTokens = 0;
+      let outputTokens = 0;
+      for await (const event of adapter.chat({ message, cwd: taskCwd, sessionId: task.sessionId, model })) {
+        if (event && typeof event === "object" && (event as Record<string, unknown>).type === "result") {
+          const usage = (event as Record<string, unknown>).usage as Record<string, number> | undefined;
+          if (usage) {
+            inputTokens += usage.input_tokens ?? 0;
+            outputTokens += usage.output_tokens ?? 0;
+          }
+        }
+      }
+      return { inputTokens, outputTokens };
+    };
+
+    // withRetry: 主模型失败 → 重试一次 → 降级 haiku → 飞书红卡
+    let finalModel = primaryModel;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let succeeded = false;
+
+    // 第一次尝试（主模型）
+    console.log(chalk.gray(`[Scheduler] 模型: ${primaryModel} (${task.skill})`));
+    try {
+      ({ inputTokens, outputTokens } = await runChat(primaryModel));
+      succeeded = true;
+    } catch (err1) {
+      console.warn(chalk.yellow(`[Scheduler] 首次失败，重试: ${task.name}`), err1);
+      // 重试一次（主模型）
+      try {
+        ({ inputTokens, outputTokens } = await runChat(primaryModel));
+        succeeded = true;
+      } catch (err2) {
+        // 降级 haiku（主模型已是 haiku 时跳过）
+        if (primaryModel !== "haiku") {
+          console.warn(chalk.yellow(`[Scheduler] 降级到 haiku: ${task.name}`));
+          finalModel = "haiku";
+          try {
+            ({ inputTokens, outputTokens } = await runChat("haiku"));
+            succeeded = true;
+          } catch (err3) {
+            console.error(chalk.red(`[Scheduler] 全部失败: ${task.name}`), err3);
+          }
+        } else {
+          console.error(chalk.red(`[Scheduler] 全部失败: ${task.name}`), err2);
+        }
+      }
+    }
+
+    if (succeeded) {
       console.log(chalk.green(`[Scheduler] 任务完成: ${task.name}`));
       recordHistory(taskCwd, task.name, "✅ 成功");
-    } catch (error) {
-      console.error(chalk.red(`[Scheduler] 任务失败: ${task.name}`), error);
+      recordCostLog(taskCwd, { task: task.name, skill: task.skill, model: finalModel, status: "success", durationMs: Date.now() - taskStartTime, inputTokens, outputTokens });
+      // 幂等任务写缓存
+      if (isCacheable(task)) {
+        const cache = loadCache();
+        cache[getCacheKey(task)] = { ts: new Date().toISOString(), model: finalModel };
+        saveCache(cache);
+      }
+    } else {
       recordHistory(taskCwd, task.name, "❌ 失败");
+      recordCostLog(taskCwd, { task: task.name, skill: task.skill, model: finalModel, status: "failed", durationMs: Date.now() - taskStartTime, inputTokens, outputTokens });
+      // 飞书红卡告警
+      try {
+        const sendJs = join(taskCwd, ".claude", "skills", "tell-me", "send.js");
+        if (existsSync(sendJs)) {
+          execSync(`node "${sendJs}" "【定时任务失败】${task.name}" "任务 ${task.name} 执行失败（重试+降级均无效），请检查日志。" red`, { timeout: 10000 });
+        }
+      } catch {
+        // 通知失败静默处理
+      }
     }
   };
   startScheduler(cwd, executeTask);
